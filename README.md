@@ -1,0 +1,2 @@
+# MultiAgentFileAnalysis
+基于Agentic RAG的知识库构建以及智能QA。抛弃了原始的embadding成向量的形式
