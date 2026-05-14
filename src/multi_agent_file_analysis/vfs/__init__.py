@@ -1,5 +1,23 @@
 """Virtual file-system protocol exposed to retrieval agents."""
 
-from .protocol import VirtualFileSystem
+from .policy import VfsAccessPolicy
+from .protocol import (
+    DirectoryEntry,
+    DirectoryListing,
+    FileReadResult,
+    GrepHit,
+    GrepResult,
+    VfsToolCall,
+    VirtualFileSystem,
+)
 
-__all__ = ["VirtualFileSystem"]
+__all__ = [
+    "DirectoryEntry",
+    "DirectoryListing",
+    "FileReadResult",
+    "GrepHit",
+    "GrepResult",
+    "VfsAccessPolicy",
+    "VfsToolCall",
+    "VirtualFileSystem",
+]

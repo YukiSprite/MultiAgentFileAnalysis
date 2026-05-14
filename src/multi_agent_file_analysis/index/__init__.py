@@ -1,5 +1,6 @@
 """Static page-index structures and loading entry points."""
 
-from .schema import IndexNode, PageIndex
+from .repository import PageIndexRepository
+from .schema import IndexNode, NodeKind, PageIndex, SourceDocument
 
-__all__ = ["IndexNode", "PageIndex"]
+__all__ = ["IndexNode", "NodeKind", "PageIndex", "PageIndexRepository", "SourceDocument"]
