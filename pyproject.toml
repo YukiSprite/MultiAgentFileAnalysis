@@ -1,0 +1,17 @@
+[project]
+name = "multi-agent-file-analysis"
+version = "0.1.0"
+description = "Agentic RAG knowledge-base QA with a virtual file-system retrieval layer."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "MultiAgentFileAnalysis contributors" }
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

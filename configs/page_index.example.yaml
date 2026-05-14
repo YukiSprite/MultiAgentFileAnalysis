@@ -1,0 +1,12 @@
+version: "0.1"
+root:
+  path: "/"
+  description: "Virtual root of the knowledge base."
+  children:
+    - path: "/examples"
+      kind: "directory"
+      description: "Example domain documents used while developing the retrieval workflow."
+    - path: "/examples/README.md"
+      kind: "file"
+      description: "Placeholder document mapped into the virtual file system."
+      source: "knowledge_base/README.md"

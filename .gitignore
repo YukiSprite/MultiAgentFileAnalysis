@@ -1,0 +1,131 @@
+# =========================
+# Local secrets and identity
+# =========================
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+
+secrets/
+credentials/
+tokens/
+*.secret
+*.token
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*credentials*.json
+*token*.json
+*service-account*.json
+
+# =========================
+# Private project materials
+# =========================
+内部项目思路*
+*内部项目思路*
+/*核心思路*.pdf
+/*架构说明*.pdf
+docs/private/
+private/
+*.private.md
+*.secret.md
+*.local.md
+
+# =========================
+# Local knowledge-base data
+# =========================
+knowledge_base/private/
+knowledge_base/raw/
+knowledge_base/local/
+knowledge_base/**/*.local.*
+
+data/raw/
+data/private/
+data/local/
+datasets/
+
+# Keep public examples trackable.
+!knowledge_base/README.md
+!configs/page_index.example.yaml
+
+# =========================
+# Generated indexes and runs
+# =========================
+artifacts/
+outputs/
+runs/
+logs/
+*.log
+
+*.db
+*.sqlite
+*.sqlite3
+*.faiss
+*.index
+*.pkl
+*.pickle
+*.parquet
+*.pt
+*.onnx
+
+# =========================
+# Python build and cache
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+.python-version
+.venv/
+venv/
+env/
+ENV/
+
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# =========================
+# Notebook and analysis cache
+# =========================
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# =========================
+# Editor, OS, and temp files
+# =========================
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.cache/
+.tmp/
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
