@@ -1,4 +1,9 @@
-"""Human-in-the-loop session boundary."""
+"""Human-in-the-loop session boundary.
+
+HITL keeps real-world operations under user control. The system may suggest
+safe read-only commands, but this layer should never execute commands on a
+user's server by itself.
+"""
 
 from dataclasses import dataclass
 from typing import Protocol
@@ -8,7 +13,11 @@ from multi_agent_file_analysis.graph.state import DiagnosisState, HumanRequest
 
 @dataclass(slots=True)
 class HumanResponse:
-    """User response that resumes a suspended workflow."""
+    """User response that resumes a suspended workflow.
+
+    content should contain the logs, command output, or config snippet pasted by
+    the user. source_hint can record where it came from for later auditing.
+    """
 
     content: str
     source_hint: str | None = None
@@ -23,7 +32,11 @@ class HumanChannel(Protocol):
 
 
 class HITLSession:
-    """Creates and consumes user-facing information requests."""
+    """Creates and consumes user-facing information requests.
+
+    Future implementations should support suspend/resume semantics so a workflow
+    can be serialized while waiting for a user response.
+    """
 
     def __init__(self, channel: HumanChannel | None = None) -> None:
         self._channel = channel

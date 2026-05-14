@@ -1,4 +1,9 @@
-"""Shared state passed between graph nodes."""
+"""Shared state passed between graph nodes.
+
+DiagnosisState is the workflow's single source of truth. Agents and nodes should
+communicate by reading and updating this state instead of keeping hidden global
+state or passing ad-hoc dictionaries between layers.
+"""
 
 from dataclasses import dataclass, field
 
@@ -13,7 +18,12 @@ from multi_agent_file_analysis.core import (
 
 @dataclass(slots=True)
 class EvidenceItem:
-    """Evidence extracted from the knowledge base."""
+    """Evidence extracted from the knowledge base.
+
+    Evidence is the bridge between retrieval and reasoning. The final answer
+    should only make claims that can be traced back to one or more EvidenceItem
+    objects.
+    """
 
     source_path: str
     summary: str
@@ -25,7 +35,12 @@ class EvidenceItem:
 
 @dataclass(slots=True)
 class ExplorationStep:
-    """One trace entry for Explorer tool usage."""
+    """One trace entry for Explorer tool usage.
+
+    This is a human-readable workflow trace. AuditEvent is the structured sink;
+    ExplorationStep is kept in state so Reasoner, Critic, and debuggers can see
+    how evidence was collected.
+    """
 
     tool_name: ToolName
     path: str
@@ -35,7 +50,12 @@ class ExplorationStep:
 
 @dataclass(slots=True)
 class RuntimeContextItem:
-    """User-provided runtime context such as logs or config snippets."""
+    """User-provided runtime context such as logs or config snippets.
+
+    Runtime context is intentionally separated from knowledge-base evidence:
+    it describes the user's live environment, while EvidenceItem describes
+    static rules found in documentation.
+    """
 
     label: str
     content: str
@@ -44,7 +64,12 @@ class RuntimeContextItem:
 
 @dataclass(slots=True)
 class DiagnosisDraft:
-    """Reasoner's provisional answer before critic review."""
+    """Reasoner's provisional answer before critic review.
+
+    This object is not safe to show as final output until CriticAgent approves
+    it. Keeping it structured makes it easier for Critic to check every action
+    and every cited source.
+    """
 
     summary: str
     root_cause: str | None = None
@@ -54,7 +79,12 @@ class DiagnosisDraft:
 
 @dataclass(slots=True)
 class HumanRequest:
-    """A request for user-provided runtime information."""
+    """A request for user-provided runtime information.
+
+    The system should use this when it needs facts from a real environment.
+    suggested_command should be read-only and user-run; the model should never
+    execute it against the user's machine or server by itself.
+    """
 
     prompt: str
     expected_input: str
@@ -64,7 +94,12 @@ class HumanRequest:
 
 @dataclass(slots=True)
 class CriticReport:
-    """Critic's structured review of a diagnosis draft."""
+    """Critic's structured review of a diagnosis draft.
+
+    A report with APPROVED means the draft can be finalized. Other decisions
+    should route the workflow back to evidence collection, revision, or failure
+    depending on the workflow policy.
+    """
 
     decision: ReviewDecision
     notes: list[str] = field(default_factory=list)
@@ -73,7 +108,15 @@ class CriticReport:
 
 @dataclass(slots=True)
 class DiagnosisState:
-    """State shared by Explorer, Reasoner, Critic, and HITL nodes."""
+    """State shared by Explorer, Reasoner, Critic, and HITL nodes.
+
+    Field groups:
+    - identity and lifecycle: run_id, status, stage;
+    - user inputs: user_query, user_context, runtime_context;
+    - retrieval trace: exploration_log, evidence;
+    - reasoning and review: diagnosis_draft, critic_report, critic_notes;
+    - suspension/finalization: human_request, final_answer, errors.
+    """
 
     user_query: str
     run_id: str = ""

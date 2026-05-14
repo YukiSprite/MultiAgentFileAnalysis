@@ -1,4 +1,9 @@
-"""Common agent contracts."""
+"""Common agent contracts.
+
+Agents are intentionally small role objects. They receive DiagnosisState and
+AgentContext, then return AgentResult. They should not own workflow routing
+policy beyond suggesting a next_stage in the result.
+"""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -13,7 +18,12 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class AgentContext:
-    """Runtime dependencies shared by agent steps."""
+    """Runtime dependencies shared by agent steps.
+
+    AgentContext keeps infrastructure out of DiagnosisState. The state should
+    remain serializable domain data; clients, audit sinks, and runtime metadata
+    belong here.
+    """
 
     run_id: str
     llm_client: "LLMClient | None" = None
@@ -23,7 +33,12 @@ class AgentContext:
 
 @dataclass(slots=True)
 class AgentResult:
-    """Generic result emitted by an agent step."""
+    """Generic result emitted by an agent step.
+
+    The message should be concise and operational, suitable for audit logs and
+    debugging. Long model outputs should be stored in structured state fields
+    such as diagnosis_draft or critic_report.
+    """
 
     role: AgentRole
     status: AgentResultStatus

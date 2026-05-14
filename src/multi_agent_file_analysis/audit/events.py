@@ -1,4 +1,9 @@
-"""Structured events emitted by the workflow."""
+"""Structured events emitted by the workflow.
+
+Audit events are the project's explanation trail. They should make it possible
+to reconstruct which stage ran, which tool was called, and why a draft was
+approved or rejected.
+"""
 
 from dataclasses import dataclass, field
 from enum import StrEnum

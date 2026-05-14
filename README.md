@@ -8,7 +8,12 @@
 ## 架构文档
 
 - [项目架构说明](docs/architecture.md)
+- [核心逻辑说明](docs/core_logic.md)
+- [模块参考](docs/module_reference.md)
+- [工程师接手指南](docs/engineer_handoff.md)
 - [示例 Page Index](configs/page_index.example.yaml)
+
+建议后续工程师按 `README -> architecture -> core_logic -> module_reference -> engineer_handoff` 的顺序阅读。
 
 ## 顶层模块
 

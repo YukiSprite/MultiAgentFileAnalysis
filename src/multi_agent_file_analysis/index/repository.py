@@ -1,4 +1,9 @@
-"""Page-index repository boundary."""
+"""Page-index repository boundary.
+
+The repository is the query layer over PageIndex. It centralizes path
+normalization and source resolution so VFS does not need to understand the
+details of tree traversal.
+"""
 
 from pathlib import Path
 
@@ -6,7 +11,11 @@ from .schema import IndexNode, PageIndex
 
 
 class PageIndexRepository:
-    """Resolves virtual paths against an in-memory page index."""
+    """Resolves virtual paths against an in-memory page index.
+
+    Future implementations must prevent path traversal. resolve_source_path()
+    should only return files under knowledge_base_root.
+    """
 
     def __init__(self, index: PageIndex, knowledge_base_root: Path) -> None:
         self._index = index

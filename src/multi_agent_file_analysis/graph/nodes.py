@@ -1,4 +1,10 @@
-"""Workflow node boundaries."""
+"""Workflow node boundaries.
+
+Nodes adapt high-level workflow stages to lower-level services. They should be
+thin: call the corresponding Agent or HITL session, update state-level routing
+signals, and return NodeResult. Heavy prompt, parsing, and VFS logic should stay
+outside these wrappers.
+"""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -13,7 +19,11 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class NodeResult:
-    """Result emitted by one graph node."""
+    """Result emitted by one graph node.
+
+    Workflow uses this object to decide the next transition without inspecting
+    provider-specific model responses or tool outputs.
+    """
 
     status: WorkflowStatus
     current_stage: WorkflowStage
@@ -32,7 +42,11 @@ class WorkflowNode(Protocol):
 
 
 class ExplorerNode:
-    """Graph node wrapping ExplorerAgent."""
+    """Graph node wrapping ExplorerAgent.
+
+    Expected behavior: run Explorer, collect evidence, then route to Reasoner
+    unless Explorer reports failure or asks for a different transition.
+    """
 
     stage = WorkflowStage.EXPLORE
 
@@ -45,7 +59,11 @@ class ExplorerNode:
 
 
 class ReasonerNode:
-    """Graph node wrapping ReasonerAgent."""
+    """Graph node wrapping ReasonerAgent.
+
+    Expected behavior: produce a DiagnosisDraft or a HumanRequest. A draft
+    routes to Critic; a HumanRequest routes to HITL.
+    """
 
     stage = WorkflowStage.REASON
 
@@ -58,7 +76,11 @@ class ReasonerNode:
 
 
 class CriticNode:
-    """Graph node wrapping CriticAgent."""
+    """Graph node wrapping CriticAgent.
+
+    Expected behavior: inspect the draft and evidence, then route to finalize,
+    revision, re-exploration, or failure based on CriticReport.decision.
+    """
 
     stage = WorkflowStage.CRITIQUE
 
@@ -71,7 +93,11 @@ class CriticNode:
 
 
 class HITLNode:
-    """Graph node wrapping human-in-the-loop suspension."""
+    """Graph node wrapping human-in-the-loop suspension.
+
+    Expected behavior: publish the pending HumanRequest through HITLSession and
+    mark the workflow as WAITING_FOR_HUMAN.
+    """
 
     stage = WorkflowStage.REQUEST_HUMAN_INPUT
 

@@ -1,4 +1,9 @@
-"""Public QA service boundary."""
+"""Public QA service boundary.
+
+QAService is the facade external callers should use. It hides the multi-agent
+workflow and exposes two product-level operations: ask a new question or resume
+one that is waiting for human input.
+"""
 
 from dataclasses import dataclass, field
 
@@ -24,7 +29,12 @@ class QAResponse:
 
 
 class QAService:
-    """Application facade used by CLI, API, or tests."""
+    """Application facade used by CLI, API, or tests.
+
+    This layer should translate user-facing requests into DiagnosisState and
+    translate completed or suspended state back into QAResponse. It should not
+    contain retrieval, prompt, or file-system logic.
+    """
 
     def __init__(self, workflow: DiagnosisWorkflow) -> None:
         self._workflow = workflow

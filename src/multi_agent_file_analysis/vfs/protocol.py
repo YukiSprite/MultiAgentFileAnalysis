@@ -1,4 +1,9 @@
-"""Virtual file-system tool interface."""
+"""Virtual file-system tool interface.
+
+VFS is the controlled retrieval surface exposed to ExplorerAgent. It should be
+implemented as a safe browser over PageIndexRepository, not as unrestricted file
+system access.
+"""
 
 from dataclasses import dataclass
 
@@ -18,7 +23,12 @@ class DirectoryEntry:
 
 @dataclass(slots=True)
 class DirectoryListing:
-    """Structured result for v_ls."""
+    """Structured result for v_ls.
+
+    v_ls should return one directory level. It should not recursively expand the
+    whole knowledge tree, because directory summaries are meant to guide the next
+    targeted action.
+    """
 
     path: str
     entries: list[DirectoryEntry]
@@ -27,7 +37,12 @@ class DirectoryListing:
 
 @dataclass(slots=True)
 class FileReadResult:
-    """Structured result for v_cat."""
+    """Structured result for v_cat.
+
+    content may be truncated according to AppConfig.max_file_chars. When
+    truncated is true, Explorer should normally switch to v_grep or a narrower
+    document path instead of asking for more raw text.
+    """
 
     path: str
     content: str
@@ -48,7 +63,11 @@ class GrepHit:
 
 @dataclass(slots=True)
 class GrepResult:
-    """Structured result for v_grep."""
+    """Structured result for v_grep.
+
+    v_grep provides exact symbolic matching. It should favor compact hit
+    contexts over broad semantic recall.
+    """
 
     path: str
     pattern: str
@@ -66,7 +85,11 @@ class VfsToolCall:
 
 
 class VirtualFileSystem:
-    """Controlled browsing protocol for agents."""
+    """Controlled browsing protocol for agents.
+
+    Only ExplorerAgent should receive an instance of this interface. Other
+    agents should rely on EvidenceItem objects already stored in DiagnosisState.
+    """
 
     def v_ls(self, path: str) -> DirectoryListing:
         """List one virtual directory level."""
