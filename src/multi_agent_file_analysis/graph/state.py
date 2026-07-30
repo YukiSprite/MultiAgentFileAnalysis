@@ -31,6 +31,22 @@ class EvidenceItem:
     quote: str | None = None
     line_start: int | None = None
     line_end: int | None = None
+    source_version: str | None = None
+    section: str | None = None
+    retrieval_query: str | None = None
+    content_hash: str | None = None
+    applicability_conditions: list[str] = field(default_factory=list)
+    truncated: bool = False
+    verified: bool = False
+
+    @property
+    def citation_key(self) -> str:
+        """Stable citation key used by deterministic validation."""
+        if self.line_start is None:
+            return self.source_path
+        if self.line_end and self.line_end != self.line_start:
+            return f"{self.source_path}:L{self.line_start}-L{self.line_end}"
+        return f"{self.source_path}:L{self.line_start}"
 
 
 @dataclass(slots=True)
@@ -60,6 +76,8 @@ class RuntimeContextItem:
     label: str
     content: str
     source_hint: str | None = None
+    request_id: str | None = None
+    verified: bool = False
 
 
 @dataclass(slots=True)
@@ -75,6 +93,8 @@ class DiagnosisDraft:
     root_cause: str | None = None
     recommended_actions: list[str] = field(default_factory=list)
     cited_evidence: list[str] = field(default_factory=list)
+    uncertainties: list[str] = field(default_factory=list)
+    confidence: str | None = None
 
 
 @dataclass(slots=True)
@@ -90,6 +110,9 @@ class HumanRequest:
     expected_input: str
     reason: str | None = None
     suggested_command: str | None = None
+    request_id: str = ""
+    command_approved: bool = False
+    command_warning: str | None = None
 
 
 @dataclass(slots=True)
@@ -104,6 +127,7 @@ class CriticReport:
     decision: ReviewDecision
     notes: list[str] = field(default_factory=list)
     missing_evidence: list[str] = field(default_factory=list)
+    unsupported_claims: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -132,3 +156,10 @@ class DiagnosisState:
     human_request: HumanRequest | None = None
     final_answer: str | None = None
     errors: list[str] = field(default_factory=list)
+    workflow_iterations: int = 0
+    exploration_attempts: int = 0
+    reasoning_attempts: int = 0
+    review_attempts: int = 0
+    resume_count: int = 0
+    next_stage: WorkflowStage | None = None
+    last_transition_reason: str | None = None

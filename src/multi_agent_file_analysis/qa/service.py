@@ -1,13 +1,12 @@
-"""Public QA service boundary.
+"""Public QA service facade."""
 
-QAService is the facade external callers should use. It hides the multi-agent
-workflow and exposes two product-level operations: ask a new question or resume
-one that is waiting for human input.
-"""
-
+import uuid
 from dataclasses import dataclass, field
 
-from multi_agent_file_analysis.graph import DiagnosisState, DiagnosisWorkflow
+from multi_agent_file_analysis.graph.state import DiagnosisState, WorkflowStatus
+from multi_agent_file_analysis.core.errors import WorkflowError
+
+from ..graph.workflow import DiagnosisWorkflow
 
 
 @dataclass(slots=True)
@@ -29,20 +28,68 @@ class QAResponse:
 
 
 class QAService:
-    """Application facade used by CLI, API, or tests.
-
-    This layer should translate user-facing requests into DiagnosisState and
-    translate completed or suspended state back into QAResponse. It should not
-    contain retrieval, prompt, or file-system logic.
-    """
+    """Application facade used by CLI, API, or tests."""
 
     def __init__(self, workflow: DiagnosisWorkflow) -> None:
         self._workflow = workflow
+        # Track sessions for resume
+        self._sessions: dict[str, DiagnosisState] = {}
 
     def ask(self, request: QARequest) -> QAResponse:
-        """Start a new QA workflow."""
-        raise NotImplementedError
+        query = request.query.strip()
+        if not query:
+            raise WorkflowError("Question must not be empty")
+        run_id = request.run_id or uuid.uuid4().hex[:12]
+        if run_id in self._sessions:
+            raise WorkflowError(
+                f"Run {run_id} is waiting for input; resume it instead"
+            )
+        state = DiagnosisState(
+            user_query=query,
+            run_id=run_id,
+            user_context=request.context,
+        )
+
+        state = self._workflow.run(state)
+
+        if state.status == WorkflowStatus.WAITING_FOR_HUMAN:
+            self._sessions[run_id] = state
+            return QAResponse(
+                state=state,
+                answer=None,
+                needs_human_input=True,
+            )
+
+        self._sessions.pop(run_id, None)
+        return QAResponse(
+            state=state,
+            answer=state.final_answer,
+            needs_human_input=False,
+        )
 
     def resume(self, state: DiagnosisState, user_input: str) -> QAResponse:
-        """Resume a QA workflow that is waiting for human input."""
-        raise NotImplementedError
+        state = self._workflow.resume(state, user_input)
+
+        if state.status == WorkflowStatus.WAITING_FOR_HUMAN:
+            self._sessions[state.run_id] = state
+            return QAResponse(
+                state=state,
+                answer=None,
+                needs_human_input=True,
+            )
+
+        self._sessions.pop(state.run_id, None)
+        return QAResponse(
+            state=state,
+            answer=state.final_answer,
+            needs_human_input=False,
+        )
+
+    def resume_by_id(self, run_id: str, user_input: str) -> QAResponse:
+        state = self._sessions.get(run_id)
+        if state is None:
+            raise WorkflowError(f"No suspended workflow found for run {run_id}")
+        return self.resume(state, user_input)
+
+    def get_session(self, run_id: str) -> DiagnosisState | None:
+        return self._sessions.get(run_id)

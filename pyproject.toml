@@ -1,13 +1,21 @@
 [project]
 name = "multi-agent-file-analysis"
-version = "0.1.0"
-description = "Agentic RAG knowledge-base QA with a virtual file-system retrieval layer."
+version = "0.2.0"
+description = "Evidence-grounded multi-agent QA over a controlled virtual knowledge base."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
   { name = "MultiAgentFileAnalysis contributors" }
 ]
+
+dependencies = [
+    "pyyaml>=6.0",
+    "openai>=1.0",
+]
+
+[project.scripts]
+mafa = "multi_agent_file_analysis.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

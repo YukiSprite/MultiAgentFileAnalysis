@@ -4,9 +4,12 @@ from .policy import VfsAccessPolicy
 from .protocol import (
     DirectoryEntry,
     DirectoryListing,
+    EvidenceVerification,
     FileReadResult,
     GrepHit,
     GrepResult,
+    SearchHit,
+    SearchResult,
     VfsToolCall,
     VirtualFileSystem,
 )
@@ -14,9 +17,12 @@ from .protocol import (
 __all__ = [
     "DirectoryEntry",
     "DirectoryListing",
+    "EvidenceVerification",
     "FileReadResult",
     "GrepHit",
     "GrepResult",
+    "SearchHit",
+    "SearchResult",
     "VfsAccessPolicy",
     "VfsToolCall",
     "VirtualFileSystem",

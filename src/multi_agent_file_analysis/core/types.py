@@ -18,6 +18,7 @@ class WorkflowStatus(StrEnum):
     RUNNING = "running"
     WAITING_FOR_HUMAN = "waiting_for_human"
     COMPLETED = "completed"
+    ABSTAINED = "abstained"
     FAILED = "failed"
 
 
@@ -73,3 +74,5 @@ class ToolName(StrEnum):
     V_LS = "v_ls"
     V_CAT = "v_cat"
     V_GREP = "v_grep"
+    V_SEARCH = "v_search"
+    V_READ_RANGE = "v_read_range"

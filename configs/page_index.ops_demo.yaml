@@ -1,0 +1,169 @@
+version: "0.2"
+metadata:
+  corpus: "structured-operations-demo"
+  status: "test-fixture"
+  language: "zh-CN"
+
+root:
+  path: "/"
+  kind: directory
+  description: "Structured, versioned operations troubleshooting benchmark."
+  children:
+    - path: "/overview"
+      kind: directory
+      description: "Corpus contract and usage notes."
+      children:
+        - path: "/overview/README.md"
+          kind: file
+          description: "Purpose, limitations, and recommended benchmark questions."
+          source: "ops_demo/README.md"
+          tags: ["overview", "benchmark"]
+          metadata:
+            authority: "corpus-contract"
+
+    - path: "/scope"
+      kind: directory
+      description: "Environment-to-profile mapping and applicability rules."
+      children:
+        - path: "/scope/environment_matrix.md"
+          kind: file
+          description: "Maps legacy-lab and current-lab to versioned OpenSSH and systemd profiles."
+          source: "ops_demo/scope/environment_matrix.md"
+          tags: ["scope", "version", "applicability"]
+          aliases: ["legacy-lab", "current-lab", "profile"]
+          metadata:
+            authority: "scope-selector"
+            version: "2026-demo"
+
+    - path: "/openssh"
+      kind: directory
+      description: "OpenSSH effective configuration and versioned forwarding policies."
+      children:
+        - path: "/openssh/common"
+          kind: directory
+          description: "Cross-version OpenSSH diagnostic process."
+          children:
+            - path: "/openssh/common/effective_configuration.md"
+              kind: file
+              description: "Required context, evidence layers, and read-only effective configuration checks."
+              source: "ops_demo/openssh/common/effective_configuration.md"
+              tags: ["openssh", "effective-config", "hitl"]
+              aliases: ["sshd -T", "effective ssh configuration"]
+              metadata:
+                product: "openssh"
+                authority: "benchmark-common-rule"
+        - path: "/openssh/ssh-policy-a"
+          kind: directory
+          description: "Legacy-lab forwarding rules."
+          children:
+            - path: "/openssh/ssh-policy-a/forwarding_policy.md"
+              kind: file
+              description: "Legacy forwarding defaults and restricted group conditions."
+              source: "ops_demo/openssh/ssh-policy-a/forwarding_policy.md"
+              tags: ["openssh", "forwarding", "legacy-lab"]
+              aliases: ["AllowTcpForwarding", "restricted"]
+              metadata:
+                product: "openssh"
+                profile: "ssh-policy-a"
+                environment: "legacy-lab"
+                version: "site-policy-2024"
+        - path: "/openssh/ssh-policy-b"
+          kind: directory
+          description: "Current-lab forwarding rules."
+          children:
+            - path: "/openssh/ssh-policy-b/forwarding_policy.md"
+              kind: file
+              description: "Current forwarding defaults plus contractors and automation conditions."
+              source: "ops_demo/openssh/ssh-policy-b/forwarding_policy.md"
+              tags: ["openssh", "forwarding", "current-lab"]
+              aliases: ["AllowTcpForwarding", "DisableForwarding", "PermitOpen"]
+              metadata:
+                product: "openssh"
+                profile: "ssh-policy-b"
+                environment: "current-lab"
+                version: "site-policy-2026"
+
+    - path: "/systemd"
+      kind: directory
+      description: "systemd unit resolution and versioned restart policies."
+      children:
+        - path: "/systemd/common"
+          kind: directory
+          description: "Cross-version unit and drop-in resolution."
+          children:
+            - path: "/systemd/common/unit_resolution.md"
+              kind: file
+              description: "Vendor units, full overrides, drop-ins, and evidence requirements."
+              source: "ops_demo/systemd/common/unit_resolution.md"
+              tags: ["systemd", "unit", "drop-in", "precedence"]
+              aliases: ["systemctl cat", "Restart"]
+              metadata:
+                product: "systemd"
+                authority: "benchmark-common-rule"
+        - path: "/systemd/unit-policy-a"
+          kind: directory
+          description: "Legacy-lab restart policy."
+          children:
+            - path: "/systemd/unit-policy-a/restart_policy.md"
+              kind: file
+              description: "Legacy restart override and three-attempt start limit."
+              source: "ops_demo/systemd/unit-policy-a/restart_policy.md"
+              tags: ["systemd", "restart", "legacy-lab"]
+              aliases: ["Restart", "StartLimitBurst"]
+              metadata:
+                product: "systemd"
+                profile: "unit-policy-a"
+                environment: "legacy-lab"
+                version: "site-policy-2024"
+        - path: "/systemd/unit-policy-b"
+          kind: directory
+          description: "Current-lab restart policy."
+          children:
+            - path: "/systemd/unit-policy-b/restart_policy.md"
+              kind: file
+              description: "Current full unit override and two-attempt start limit."
+              source: "ops_demo/systemd/unit-policy-b/restart_policy.md"
+              tags: ["systemd", "restart", "current-lab"]
+              aliases: ["Restart", "StartLimitBurst"]
+              metadata:
+                product: "systemd"
+                profile: "unit-policy-b"
+                environment: "current-lab"
+                version: "site-policy-2026"
+
+    - path: "/incidents"
+      kind: directory
+      description: "Symptom-first cases that require cross-document evidence."
+      children:
+        - path: "/incidents/ssh_tunnel_denied.md"
+          kind: file
+          description: "Case where a global forwarding setting is overridden by conditional policy."
+          source: "ops_demo/incidents/ssh_tunnel_denied.md"
+          tags: ["incident", "openssh", "symptom"]
+          aliases: ["SSH tunnel denied", "隧道被拒绝"]
+          metadata:
+            authority: "case-study"
+            product: "openssh"
+        - path: "/incidents/service_restart_loop.md"
+          kind: file
+          description: "Case requiring unit precedence and version-specific start limits."
+          source: "ops_demo/incidents/service_restart_loop.md"
+          tags: ["incident", "systemd", "symptom"]
+          aliases: ["restart loop", "重启次数"]
+          metadata:
+            authority: "case-study"
+            product: "systemd"
+
+    - path: "/safety"
+      kind: directory
+      description: "Deterministic command safety policy."
+      children:
+        - path: "/safety/diagnostic_commands.md"
+          kind: file
+          description: "Allowed bounded read-only commands and prohibited mutation patterns."
+          source: "ops_demo/safety/diagnostic_commands.md"
+          tags: ["safety", "hitl", "commands"]
+          aliases: ["read-only command", "只读命令"]
+          metadata:
+            authority: "safety-policy"
+            product: "cross-cutting"

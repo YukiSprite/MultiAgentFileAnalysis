@@ -1,4 +1,4 @@
-"""Schema placeholders for the virtual page index.
+"""Schemas for the versioned virtual Page Index.
 
 The Page Index is the map that turns a physical knowledge base into a controlled
 virtual tree. It should contain enough summaries for Explorer to choose useful

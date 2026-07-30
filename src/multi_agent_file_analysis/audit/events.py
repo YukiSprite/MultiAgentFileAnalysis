@@ -13,6 +13,7 @@ class AuditEventType(StrEnum):
     """Event categories used for traceability."""
 
     WORKFLOW_STARTED = "workflow_started"
+    WORKFLOW_RESUMED = "workflow_resumed"
     WORKFLOW_STAGE_CHANGED = "workflow_stage_changed"
     TOOL_CALLED = "tool_called"
     AGENT_STARTED = "agent_started"
@@ -20,6 +21,7 @@ class AuditEventType(StrEnum):
     HUMAN_INPUT_REQUESTED = "human_input_requested"
     HUMAN_INPUT_RECEIVED = "human_input_received"
     WORKFLOW_FINISHED = "workflow_finished"
+    WORKFLOW_FAILED = "workflow_failed"
 
 
 @dataclass(slots=True)

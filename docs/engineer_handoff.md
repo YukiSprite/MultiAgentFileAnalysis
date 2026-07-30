@@ -1,139 +1,67 @@
 # 工程师接手指南
 
-这份文档给后续开发者提供接手路线。当前项目已经有明确架构，但多数函数仍是接口契约，业务逻辑需要按阶段补上。
+## 当前状态
 
-## 1. 接手时先读什么
+仓库已经具备可运行 MVP，不再只是接口骨架：
 
-建议阅读顺序：
+- 索引、VFS、词法搜索和证据验证已实现；
+- 三 Agent、有界工作流和 HITL 已实现；
+- OpenAI 兼容网关、CLI、审计和本地入库已实现；
+- 复杂结构化测试语料已加入；
+- 自动化测试覆盖关键安全边界。
 
-1. `README.md`：确认项目定位。
-2. `docs/architecture.md`：看总体架构。
-3. `docs/core_logic.md`：理解核心约束和运行逻辑。
-4. `docs/module_reference.md`：查每个模块负责什么。
-5. `configs/page_index.example.yaml`：理解虚拟知识库索引格式。
-6. `src/multi_agent_file_analysis/graph/state.py`：理解共享状态。
+首先运行：
 
-## 2. 当前代码状态
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+mafa --dry-run "GW-004 错误是什么原因？"
+```
 
-当前代码是“可导入的架构契约”，不是可运行产品。
+## 推荐阅读顺序
 
-已经具备：
+1. `README.md`
+2. `docs/architecture.md`
+3. `docs/core_logic.md`
+4. `src/multi_agent_file_analysis/graph/state.py`
+5. `src/multi_agent_file_analysis/vfs/protocol.py`
+6. `src/multi_agent_file_analysis/graph/workflow.py`
+7. `tests/`
 
-- 清晰包结构。
-- dataclass 类型模型。
-- Protocol / interface 边界。
-- Agent、VFS、Index、Graph、HITL、Audit、LLM、QA 等模块划分。
-- 架构文档和示例配置。
+## 下一阶段优先级
 
-尚未具备：
+### P0：真实评测
 
-- YAML 加载实现。
-- VFS 实际文件读取和搜索实现。
-- LLM provider 实现。
-- Agent prompt 和推理逻辑。
-- Workflow 状态流转实现。
-- CLI/API。
-- 测试用例。
+- 固定官方 Ubuntu、OpenSSH 和 systemd 文档快照；
+- 建立带标准证据和拒答标签的排错问题集；
+- 比较 exact-only、当前词法搜索、BM25、混合召回、单 Agent 和多 Agent；
+- 报告证据召回、诊断正确率、误放行率、Token、费用和延迟。
 
-## 3. 推荐开发分支顺序
+### P1：检索升级
 
-### 第一阶段：索引和 VFS 最小闭环
+- 用 SQLite FTS5/BM25 替换当前轻量正文计数；
+- 增加标题/章节索引和冲突来源检测；
+- 支持可选语义召回，但保持最终原文核验；
+- 为大目录和搜索结果增加游标而不只是 offset。
 
-目标：不用 LLM，也能用 Python 调用 VFS 浏览知识库。
+### P1：服务化
 
-建议实现：
+- 把会话状态从进程内字典迁移到持久化存储；
+- 增加 tenant/session/run 隔离；
+- 给 HITL 请求增加过期时间、目标环境摘要和响应 schema；
+- 增加 HTTP API、认证、速率限制和日志脱敏。
 
-- `PageIndexLoader.load()`
-- `PageIndexLoader.validate()`
-- `PageIndexRepository.get_node()`
-- `PageIndexRepository.list_children()`
-- `PageIndexRepository.resolve_source_path()`
-- `VirtualFileSystem.v_ls()`
-- `VirtualFileSystem.v_grep()`
-- `VirtualFileSystem.v_cat()`
+### P2：入库扩展
 
-验收标准：
+- PDF/HTML 结构化转换；
+- 来源白名单、签名、发布日期和版本回滚；
+- 自动生成目录摘要并由人工审核；
+- 对更新后的文件进行增量索引。
 
-- 示例 `page_index.example.yaml` 可以加载。
-- `v_ls("/")` 能列出 `/examples`。
-- `v_cat("/examples/README.md")` 能读取内容并报告是否截断。
-- `v_grep("/examples/README.md", "Agent")` 能返回命中行。
+## 修改约定
 
-### 第二阶段：审计和状态流转
-
-目标：能记录系统每一步做了什么。
-
-建议实现：
-
-- 一个内存版或 JSONL 版 `AuditRecorder`。
-- `ExplorerNode.run()`、`ReasonerNode.run()`、`CriticNode.run()` 的最小状态转移。
-- `DiagnosisWorkflow.plan()` 和最小 `run()`。
-
-验收标准：
-
-- 每个阶段会更新 `DiagnosisState.stage`。
-- 工具调用和阶段变化能写入审计事件。
-- Workflow 可以停在 `WAITING_FOR_HUMAN` 或 `COMPLETED`。
-
-### 第三阶段：Agent 最小智能
-
-目标：接入 LLM，跑通 Explorer -> Reasoner -> Critic。
-
-建议实现：
-
-- 一个具体 `LLMClient`。
-- Explorer 的关键词规划和证据抽取 prompt。
-- Reasoner 的诊断草案 prompt。
-- Critic 的证据一致性审查 prompt。
-
-验收标准：
-
-- 最终回答能引用证据来源。
-- Critic 能驳回没有证据支持的草案。
-- 缺少运行时信息时能生成 `HumanRequest`。
-
-### 第四阶段：HITL 和产品入口
-
-目标：用户可以完成一次交互式问答。
-
-建议实现：
-
-- `HITLSession.suspend()`
-- `HITLSession.apply_response()`
-- `QAService.ask()`
-- `QAService.resume()`
-- 简单 CLI。
-
-验收标准：
-
-- 系统可以暂停并提示用户补充信息。
-- 用户输入回填后可以恢复同一份 `DiagnosisState`。
-- 最终回答中包含证据和安全建议。
-
-## 4. 开发约定
-
-1. 保持 `src/` 包内只放可复用代码。
-2. 示例知识库放 `knowledge_base/`，私有资料放 `.gitignore` 已忽略的目录。
-3. 不要让 Agent 直接读真实路径。
-4. 不要在 Workflow 中写 prompt。
-5. 不要在 `QAService` 中写底层检索逻辑。
-6. 新增模块时同步更新 `docs/module_reference.md`。
-7. 新增状态字段时同步解释 `docs/core_logic.md`。
-
-## 5. 测试建议
-
-建议按风险从低到高补测试：
-
-- `tests/index/`：索引加载、路径规范化、越界路径拦截。
-- `tests/vfs/`：目录浏览、文件截断、grep 上下文。
-- `tests/graph/`：状态转移、HITL 暂停恢复。
-- `tests/agents/`：使用 fake LLM 验证 prompt 输入输出结构。
-- `tests/e2e/`：用小型知识库跑完整 QA。
-
-## 6. 容易踩坑的点
-
-- 不要把 `knowledge_base/` 当普通文件夹递归喂给模型。
-- 不要用向量相似度替代 `v_grep` 的精确证据。
-- 不要把用户回填日志直接当成可信结论，仍要经过 Reasoner 和 Critic。
-- 不要让 Critic 只做文字润色，它必须审查证据一致性。
-- 不要让 `v_cat` 返回超长文件，长文档应引导 Agent 使用 `v_grep`。
+- 新证据字段必须保持可序列化并补测试；
+- 新 VFS 工具必须同时定义输入上限、输出上限和审计字段；
+- 任何审批异常都应 fail-closed；
+- 不允许 Finalizer 在 Critic 后新增模型内容；
+- 不允许把用户日志标成知识库规则；
+- 不要把复杂测试语料描述为官方生产手册。

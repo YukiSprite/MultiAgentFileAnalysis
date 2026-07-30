@@ -1,201 +1,115 @@
-# MultiAgentFileAnalysis 项目架构
+# MultiAgentFileAnalysis 架构说明
 
-## 1. 项目定位
+## 1. 定位与边界
 
-MultiAgentFileAnalysis 面向知识库构建与智能 QA 场景，核心思想是用 Agentic RAG 替代传统“切块、向量化、相似度召回”的检索方式。系统把知识库组织成一个受控的虚拟文件系统，让大模型通过有限工具逐步查看目录、读取文件、精确检索关键词，并在多智能体协作下生成可追溯、可审查的回答。
+项目处理配置符号密集、跨文档关联、存在版本和作用域差异的知识库问答与运维排错。系统使用只读虚拟文件接口把层级导航、词法召回、精确核验和后续可插拔检索统一在一个访问边界内。
 
-当前阶段实现具体架构契约：代码中定义模块、类型、接口和流程边界，但不实现具体检索、模型调用、文件读取、图执行等业务函数。
+当前目标是“降低无来源诊断并保留证据轨迹”，不是承诺零幻觉或绝对安全。
 
-配套文档：
-
-- [核心逻辑说明](core_logic.md)：解释系统运行逻辑和核心不变量。
-- [模块参考](module_reference.md)：逐个说明代码模块的作用和后续实现位置。
-- [工程师接手指南](engineer_handoff.md)：给后续开发者的阅读顺序、阶段计划和测试建议。
-
-## 2. 核心原则
-
-1. 数据与操作分离：知识库文件本身不直接暴露给 Agent，Agent 只能通过受控协议访问静态索引和文档内容。
-2. 精确检索优先：用字符级搜索和目录路标降低幻觉风险，不以语义相似度作为唯一证据来源。
-3. 多智能体解耦：探索、推理、审查拆分到不同角色，避免单体模型上下文膨胀和自我确认。
-4. 人在回路：系统不直接操作真实环境；需要外部状态时只生成确认请求，由用户执行并回填结果。
-5. 全链路可追溯：每次目录访问、文件读取、关键词搜索、推理结论和审查意见都应进入状态记录。
-
-## 3. 总体架构
+## 2. 组件与信任边界
 
 ```mermaid
-flowchart TD
-    U[User Query] --> G[Graph Workflow]
-    API[QA Service] --> G
-    G --> E[Explorer Agent]
-    G --> AUD[Audit Recorder]
-    E --> V[VFS Tools]
+flowchart LR
+    U[User] --> Q[QA Service]
+    Q --> W[Bounded Workflow]
+    W --> E[Explorer]
+    E --> V[VFS]
     V --> I[Page Index]
-    V --> K[Markdown Knowledge Base]
-    E --> S[Shared Diagnosis State]
-    S --> R[Reasoner Agent]
-    R --> H{Need Runtime Data?}
-    H -- yes --> Q[HITL Request]
-    Q --> U
-    U --> S
-    H -- no --> C[Critic Agent]
-    C --> A{Approved?}
-    A -- no --> E
-    A -- yes --> O[Final Answer]
+    I --> K[(Versioned Markdown KB)]
+    E --> S[(Diagnosis State)]
+    S --> R[Reasoner]
+    R --> H{Missing runtime fact?}
+    H -- yes --> B[Safe Command Broker]
+    B --> U
+    H -- no --> C[Critic]
+    C --> G{Approved?}
+    G -- yes --> F[Deterministic Finalizer]
+    G -- bounded retry --> E
+    G -- exhausted --> X[Abstain / Fail]
+    W --> A[(Audit Recorder)]
 ```
 
-## 4. 目录结构
+知识库、用户日志和模型输出都被视为不可信输入。只有 Orchestrator 可以改变流程状态；只有 Explorer 能使用 VFS；Reasoner 不能修改原始证据；Critic 只能批准、要求补证、要求修改或拒绝。
+
+## 3. 检索层
+
+VFS 当前暴露：
+
+- `v_ls`：单层、分页目录浏览，可按路标过滤；
+- `v_search`：结合路径、标题、摘要、标签、别名、元数据和正文的有界词法搜索；
+- `v_grep`：对文件或目录范围进行大小写可配置的字面搜索；
+- `v_cat`：从指定行开始读取有界内容；
+- `v_read_range`：读取明确的行范围。
+
+VFS 不直接向 Agent 暴露真实路径。Page Index 的 `source` 经 `Path.resolve()` 后必须仍位于知识库根目录；符号链接和 `..` 不能绕过边界。
+
+当前 `v_search` 是轻量词法实现，不是完整 BM25。后续可在保持 VFS 输入输出不变的前提下替换为 FTS5/BM25，并把语义召回作为候选发现通道。最终证据仍必须落到原文。
+
+## 4. 证据模型
+
+Explorer 提交的自由文本不能直接成为证据。系统必须验证引句在索引源文件中逐字存在，然后生成：
 
 ```text
-.
-├── configs/
-│   └── page_index.example.yaml
-├── docs/
-│   └── architecture.md
-├── knowledge_base/
-│   └── README.md
-├── src/
-│   └── multi_agent_file_analysis/
-│       ├── app.py
-│       ├── agents/
-│       │   ├── base.py
-│       │   ├── critic.py
-│       │   ├── explorer.py
-│       │   └── reasoner.py
-│       ├── audit/
-│       │   ├── events.py
-│       │   └── recorder.py
-│       ├── core/
-│       │   ├── errors.py
-│       │   └── types.py
-│       ├── graph/
-│       │   ├── nodes.py
-│       │   ├── plan.py
-│       │   ├── state.py
-│       │   └── workflow.py
-│       ├── hitl/
-│       │   └── session.py
-│       ├── ingestion/
-│       │   ├── pipeline.py
-│       │   └── schema.py
-│       ├── index/
-│       │   ├── loader.py
-│       │   ├── repository.py
-│       │   └── schema.py
-│       ├── llm/
-│       │   ├── client.py
-│       │   └── messages.py
-│       ├── qa/
-│       │   └── service.py
-│       ├── vfs/
-│       │   ├── policy.py
-│       │   └── protocol.py
-│       ├── config.py
-│       └── __init__.py
-├── pyproject.toml
-└── README.md
+source_path
+line_start / line_end
+exact_quote
+section
+source_version
+retrieval_query
+applicability_conditions
+content_hash
+verified
 ```
 
-## 5. 模块职责
+Reasoner 和 Critic 使用 `citation_key` 引用证据。相同路径但不同版本、章节或条件不能被视为等价规则。
 
-### 5.1 App / QA 层
+## 5. 工作流
 
-App / QA 层是后续 CLI、Web API 或测试调用系统的统一入口。
+```mermaid
+stateDiagram-v2
+    [*] --> Explore
+    Explore --> Reason
+    Reason --> HumanInput: missing runtime fact
+    HumanInput --> Reason: user response
+    Reason --> Critique: draft
+    Critique --> Finalize: approved
+    Critique --> Explore: more evidence
+    Critique --> Reason: revision
+    Critique --> Failed: rejected
+    Critique --> Abstained: retry budget exhausted
+    Finalize --> [*]
+```
 
-- `app.ApplicationFactory`：负责把 `AppConfig`、索引仓库、VFS、Agent、Workflow 和 QA Service 装配成服务图。
-- `qa.QAService`：面向用户请求，提供 `ask` 与 `resume` 两个用例边界。
-- `qa.QARequest` / `qa.QAResponse`：定义对外请求和响应结构。
+每个阶段、搜索结果、文件大小、用户输入、审查次数和总迭代数都有上限。恢复流程从 Reasoner 继续，不会重新执行 Explorer 并重复证据。
 
-### 5.2 Core 层
+## 6. HITL 与命令安全
 
-Core 层放跨模块共享的领域语言。
+Reasoner 可以说明缺少什么现场事实，并可提出一个命令候选。`SafeCommandBroker` 使用确定性规则检查：
 
-- `core.types`：定义 Agent 角色、工作流阶段、审查决策、证据类型和工具名。
-- `core.errors`：定义配置、索引、VFS、Agent、Workflow、HITL 等异常边界。
+- 可执行文件和只读子命令白名单；
+- 禁止 `sudo`；
+- 禁止管道、重定向、命令替换和多命令组合；
+- 禁止启动、停止、重启、编辑等状态变更；
+- `journalctl` 必须限制输出行数。
 
-### 5.3 Ingestion 层
+未通过门禁的命令不会展示，但信息请求本身仍可发送。用户回填内容被记录为“未验证运行时观察”，不会冒充知识库规则。
 
-Ingestion 层负责知识库构建，不参与在线问答推理。
+## 7. 审查与最终输出
 
-- `DocumentSource`：原始资料来源。
-- `IngestedDocument`：归一化后的 Markdown 文档。
-- `KnowledgeBaseBuilder`：规划入库、生成知识库文件、构建 Page Index 的管线接口。
+Critic 在模型审查前先执行确定性检查：
 
-### 5.4 Index 层
+1. 是否存在已验证证据；
+2. 草案是否引用证据；
+3. 引用是否对应现有证据路径或行号；
+4. 状态变更建议是否包含风险与回滚提示。
 
-Index 层负责描述知识库的虚拟目录结构。
+模型审查解析失败时保持未批准。只有 `APPROVED` 的结构化草案能进入 Finalizer；Finalizer 以确定性方式生成用户最终看到的文本，审查后不再调用模型润色。
 
-- `page_index.yaml`：静态索引清单，定义虚拟路径、文件类型、摘要描述和真实文档映射。
-- `index.schema`：定义目录节点、文件节点、索引元数据等核心结构。
-- `index.loader`：后续负责读取、校验和构建索引对象。
-- `index.repository`：后续负责按虚拟路径查询节点、列目录、解析真实文档路径。
+## 8. 当前限制
 
-### 5.5 VFS 层
-
-VFS 层是 Agent 访问知识库的唯一入口。
-
-- `v_ls(path)`：查看某个虚拟目录下的子项和摘要。
-- `v_cat(path)`：读取某个虚拟文件的内容，并在实现阶段加入长度截断。
-- `v_grep(path, pattern)`：在指定虚拟文件或目录范围内做精确关键词搜索。
-- `VfsAccessPolicy`：定义目录浏览、文件读取、关键词搜索的访问控制边界。
-
-这一层不向 Agent 暴露真实文件路径，后续可统一加入权限控制、审计日志和 Token 预算限制。
-
-### 5.6 LLM 层
-
-LLM 层隔离具体模型供应商。
-
-- `LLMClient`：模型调用统一接口。
-- `LLMRequest` / `LLMResponse` / `LLMMessage`：provider-neutral 的消息结构。
-
-### 5.7 Agents 层
-
-Agents 层只定义角色边界。
-
-- `ExplorerAgent`：唯一允许调用 VFS 工具的角色，负责探索知识库并提取规则证据。
-- `ReasonerAgent`：不直接检索文档，只基于用户问题、日志和 Explorer 的证据做诊断推理。
-- `CriticAgent`：审查 Reasoner 的草案，检查结论是否被证据支持，发现幻觉或越权建议时驳回。
-- `AgentContext`：向 Agent 注入 run id、LLM client、审计记录器等运行期依赖。
-
-### 5.8 Graph 层
-
-Graph 层负责流程编排和共享状态。
-
-- `DiagnosisState`：保存用户问题、探索记录、证据、推理草案、审查意见、人在回路请求和最终回答。
-- `WorkflowPlan` / `WorkflowEdge`：声明工作流阶段和可能转移。
-- `ExplorerNode` / `ReasonerNode` / `CriticNode` / `HITLNode`：将 Agent 和 HITL 包装成图节点。
-- `DiagnosisWorkflow`：后续用于编排 Explorer、Reasoner、Critic、HITL 的状态流转。
-
-### 5.9 HITL 层
-
-HITL 层处理需要用户补充外部环境信息的场景。
-
-- 当 Reasoner 发现缺少运行时状态时，生成一个明确、可执行、低风险的用户请求。
-- 系统挂起当前诊断流程，等待用户粘贴命令结果、日志或配置片段。
-- 用户补充的信息进入 `DiagnosisState`，再继续推理和审查。
-
-### 5.10 Audit 层
-
-Audit 层负责可解释性和调试追踪。
-
-- `AuditEvent`：记录工作流阶段变化、Agent 启停、工具调用、HITL 请求等事件。
-- `AuditRecorder`：审计事件输出接口，后续可接文件、数据库或可观测性平台。
-
-## 6. 数据流
-
-1. 用户提交问题、报错信息或日志。
-2. Graph 初始化 `DiagnosisState`。
-3. Explorer 根据问题线索调用 VFS 工具，读取目录路标、精确搜索关键词、抽取规则证据。
-4. Reasoner 读取共享状态中的证据和用户上下文，生成诊断草案。
-5. 如果缺少真实环境状态，Reasoner 生成 HITL 请求并暂停流程。
-6. 用户回填信息后，Reasoner 继续推理。
-7. Critic 审查草案与证据的一致性。
-8. 审查通过则输出最终回答；不通过则带着审查意见回到 Explorer 或 Reasoner 继续补证。
-
-## 7. 后续实现里程碑
-
-1. 完成 Page Index schema 和 YAML 加载校验。
-2. 实现 VFS 三个核心工具，并加入访问日志和内容截断。
-3. 接入图状态机框架，跑通 Explorer -> Reasoner -> Critic 的最小闭环。
-4. 加入 HITL 暂停与恢复机制。
-5. 增加测试用知识库和端到端诊断样例。
-6. 补充审计日志、错误处理、Token 预算和安全策略。
+- 词法排序仍较轻量，尚未实现 BM25、交叉编码重排或语义召回；
+- 当前状态保存在进程内，Web 服务需要持久化会话与租户隔离；
+- 命令白名单只覆盖少量诊断工具；
+- 入库只支持本地 Markdown 和纯文本；
+- 缺少基于真实官方快照的评测集；
+- 尚未报告相对单 Agent、BM25 和混合检索的准确率、成本与延迟。

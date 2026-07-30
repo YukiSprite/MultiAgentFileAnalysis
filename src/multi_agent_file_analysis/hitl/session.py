@@ -1,23 +1,20 @@
-"""Human-in-the-loop session boundary.
-
-HITL keeps real-world operations under user control. The system may suggest
-safe read-only commands, but this layer should never execute commands on a
-user's server by itself.
-"""
+"""Human-in-the-loop session — suspend and resume workflow."""
 
 from dataclasses import dataclass
 from typing import Protocol
 
-from multi_agent_file_analysis.graph.state import DiagnosisState, HumanRequest
+from multi_agent_file_analysis.core.errors import HITLError
+from multi_agent_file_analysis.graph.state import (
+    DiagnosisState,
+    HumanRequest,
+    RuntimeContextItem,
+    WorkflowStatus,
+)
 
 
 @dataclass(slots=True)
 class HumanResponse:
-    """User response that resumes a suspended workflow.
-
-    content should contain the logs, command output, or config snippet pasted by
-    the user. source_hint can record where it came from for later auditing.
-    """
+    """User response that resumes a suspended workflow."""
 
     content: str
     source_hint: str | None = None
@@ -26,33 +23,61 @@ class HumanResponse:
 class HumanChannel(Protocol):
     """Boundary for delivering requests to a user."""
 
-    def send_request(self, request: HumanRequest) -> None:
-        """Send a request for user-provided runtime information."""
-        ...
+    def send_request(self, request: HumanRequest) -> None: ...
 
 
 class HITLSession:
-    """Creates and consumes user-facing information requests.
+    """Creates and consumes user-facing information requests."""
 
-    Future implementations should support suspend/resume semantics so a workflow
-    can be serialized while waiting for a user response.
-    """
-
-    def __init__(self, channel: HumanChannel | None = None) -> None:
+    def __init__(
+        self,
+        channel: HumanChannel | None = None,
+        max_response_chars: int = 20_000,
+    ) -> None:
         self._channel = channel
+        self._max_response_chars = max_response_chars
+
+    @property
+    def channel(self) -> HumanChannel | None:
+        return self._channel
 
     def create_request(self, state: DiagnosisState) -> HumanRequest:
-        """Create a request for missing runtime context."""
-        raise NotImplementedError
+        req = state.human_request
+        if req is None:
+            raise HITLError("No human request in state")
+        return req
 
     def suspend(self, state: DiagnosisState) -> DiagnosisState:
-        """Mark the workflow as waiting for human input."""
-        raise NotImplementedError
+        if state.human_request is None:
+            raise HITLError("Cannot suspend: no human_request in state")
+        state.status = WorkflowStatus.WAITING_FOR_HUMAN
+        return state
 
     def apply_response(
         self,
         state: DiagnosisState,
         response: HumanResponse,
     ) -> DiagnosisState:
-        """Attach a user response to the workflow state."""
-        raise NotImplementedError
+        if state.status != WorkflowStatus.WAITING_FOR_HUMAN:
+            raise HITLError("Cannot apply response: workflow is not waiting for human input")
+        content = response.content.strip()
+        if not content:
+            raise HITLError("Human response must not be empty")
+        if len(content) > self._max_response_chars:
+            raise HITLError(
+                f"Human response exceeds {self._max_response_chars} characters"
+            )
+
+        label = state.human_request.prompt[:80] if state.human_request else "user_input"
+        request_id = state.human_request.request_id if state.human_request else None
+        state.runtime_context.append(
+            RuntimeContextItem(
+                label=label,
+                content=content,
+                source_hint=response.source_hint,
+                request_id=request_id,
+                verified=False,
+            )
+        )
+        state.human_request = None
+        return state

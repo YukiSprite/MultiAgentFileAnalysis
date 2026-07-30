@@ -1,4 +1,4 @@
-"""Graph workflow and shared state."""
+"""Graph workflow implementation — state machine and nodes."""
 
 from .nodes import CriticNode, ExplorerNode, HITLNode, NodeResult, ReasonerNode, WorkflowNode
 from .plan import WorkflowEdge, WorkflowPlan

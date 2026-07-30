@@ -1,23 +1,27 @@
-# Page Index 是虚拟文件系统的地图。
-# Agent 只能通过这个索引看到知识库，而不是直接扫描真实目录。
-version: "0.1"
+# Page Index for MultiAgentFileAnalysis sample knowledge base.
+version: "0.2"
 
-# root 定义虚拟文件系统的根节点。
-# path 使用虚拟路径，必须以 / 开头；它不等于真实磁盘路径。
+metadata:
+  corpus: "sample-service-guide"
+  status: "demo"
+
 root:
   path: "/"
   description: "Virtual root of the knowledge base."
 
-  # children 只描述当前节点的直接子项。
-  # VFS 的 v_ls("/") 应该只返回这一层，避免一次性暴露整棵树。
   children:
-    - path: "/examples"
+    - path: "/docs"
       kind: "directory"
-      description: "Example domain documents used while developing the retrieval workflow."
+      description: "Service documentation, configuration guides, and troubleshooting references."
 
-      # 文件节点通过 source 映射到 knowledge_base_root 下的真实 Markdown 文件。
-      # 后续实现中必须校验 source 不能逃出 knowledge_base_root。
-    - path: "/examples/README.md"
-      kind: "file"
-      description: "Placeholder document mapped into the virtual file system."
-      source: "knowledge_base/README.md"
+      children:
+        - path: "/docs/service_guide.md"
+          kind: "file"
+          description: "Complete service guide covering architecture, environment variables, error codes, and troubleshooting for api-gateway, user-service, and order-service."
+          source: "service_guide.md"
+          tags: ["configuration", "troubleshooting", "error-codes", "architecture"]
+          aliases: ["GW-004", "US-004", "RATE_LIMIT_RPS"]
+          metadata:
+            version: "demo-1"
+            product: "sample-microservices"
+            authority: "test-fixture"
