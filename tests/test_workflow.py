@@ -20,6 +20,7 @@ from multi_agent_file_analysis.graph import (
     HumanRequest,
 )
 from multi_agent_file_analysis.hitl import HITLSession
+from multi_agent_file_analysis.qa import QARequest, QAService
 
 
 def evidence() -> EvidenceItem:
@@ -138,6 +139,9 @@ class WorkflowTests(unittest.TestCase):
         state = workflow.run(DiagnosisState(user_query="question"))
         self.assertEqual(WorkflowStatus.WAITING_FOR_HUMAN, state.status)
         self.assertEqual(1, explorer.calls)
+        self.assertIn("阶段性回答（尚未完成最终审查）", state.partial_answer or "")
+        self.assertIn("Verified rule.", state.partial_answer or "")
+        self.assertIn("等待补充现场信息", state.partial_answer or "")
         state = workflow.resume(state, "service is active")
         self.assertEqual(WorkflowStatus.COMPLETED, state.status)
         self.assertEqual(1, explorer.calls)
@@ -152,6 +156,22 @@ class WorkflowTests(unittest.TestCase):
         state = workflow.run(DiagnosisState(user_query="question"))
         self.assertEqual(WorkflowStatus.FAILED, state.status)
         self.assertIn("reasoning failed", state.errors)
+        self.assertIn("阶段性回答", state.partial_answer or "")
+        self.assertIn("Verified rule.", state.partial_answer or "")
+        self.assertIn("reasoning failed", state.partial_answer or "")
+
+    def test_qa_service_returns_partial_answer_for_terminal_failure(self) -> None:
+        workflow = DiagnosisWorkflow(
+            explorer=CountingExplorer(),
+            reasoner=FailingReasoner(),
+            critic=ApprovingCritic(),
+        )
+
+        response = QAService(workflow).ask(QARequest(query="question"))
+
+        self.assertTrue(response.is_partial)
+        self.assertIn("阶段性回答", response.answer or "")
+        self.assertIsNone(response.state.final_answer)
 
     def test_review_retry_budget_ends_in_abstention(self) -> None:
         class DraftReasoner:
@@ -179,6 +199,9 @@ class WorkflowTests(unittest.TestCase):
         state = workflow.run(DiagnosisState(user_query="question"))
         self.assertEqual(WorkflowStatus.ABSTAINED, state.status)
         self.assertEqual(2, state.review_attempts)
+        self.assertIn("当前暂定断言", state.partial_answer or "")
+        self.assertIn("draft", state.partial_answer or "")
+        self.assertIn("Critic retry budget exhausted", state.partial_answer or "")
 
 
 if __name__ == "__main__":

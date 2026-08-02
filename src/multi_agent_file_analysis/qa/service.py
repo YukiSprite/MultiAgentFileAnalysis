@@ -25,6 +25,7 @@ class QAResponse:
     state: DiagnosisState
     answer: str | None = None
     needs_human_input: bool = False
+    is_partial: bool = False
 
 
 class QAService:
@@ -56,15 +57,17 @@ class QAService:
             self._sessions[run_id] = state
             return QAResponse(
                 state=state,
-                answer=None,
+                answer=state.partial_answer,
                 needs_human_input=True,
+                is_partial=state.partial_answer is not None,
             )
 
         self._sessions.pop(run_id, None)
         return QAResponse(
             state=state,
-            answer=state.final_answer,
+            answer=state.final_answer or state.partial_answer,
             needs_human_input=False,
+            is_partial=state.final_answer is None and state.partial_answer is not None,
         )
 
     def resume(self, state: DiagnosisState, user_input: str) -> QAResponse:
@@ -74,15 +77,17 @@ class QAService:
             self._sessions[state.run_id] = state
             return QAResponse(
                 state=state,
-                answer=None,
+                answer=state.partial_answer,
                 needs_human_input=True,
+                is_partial=state.partial_answer is not None,
             )
 
         self._sessions.pop(state.run_id, None)
         return QAResponse(
             state=state,
-            answer=state.final_answer,
+            answer=state.final_answer or state.partial_answer,
             needs_human_input=False,
+            is_partial=state.final_answer is None and state.partial_answer is not None,
         )
 
     def resume_by_id(self, run_id: str, user_input: str) -> QAResponse:

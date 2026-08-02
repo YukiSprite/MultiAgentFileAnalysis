@@ -7,15 +7,17 @@
 ## 已实现能力
 
 - Page Index YAML 加载、校验、目录扫描和路径隔离；
-- 分页 `v_ls`、范围读取 `v_cat/v_read_range`；
-- 文件或目录级 `v_grep`；
-- 元数据、别名和正文联合排序的 `v_search`；
+- 启动时知识库菜单、单语料 VFS 挂载和连续问答会话；
+- 模型原生 function calling，以及不支持时的 JSON 文本回退；
+- `pwd/cd/ls/find/stat/cat/head/tail/grep/search` Unix 风格只读工具；
+- 元数据、别名和正文联合排序的词法 `search`；
 - Explorer、Reasoner、Critic 三阶段工作流；
 - 原文引句、行号、版本、章节和内容哈希组成的证据包；
 - Critic fail-closed、审查回退预算和确定性最终渲染；
 - HITL 暂停/恢复及只读诊断命令白名单；
 - 内存与 JSONL 审计日志；
 - 本地 Markdown/text 入库管线；
+- CHM 安全解包、目录解析、编码识别、HTML/表格到 Markdown 的离线预处理；
 - 单文件入门语料和多版本复杂运维基准语料；
 - 自动化测试。
 
@@ -42,6 +44,49 @@ mafa --dry-run "GW-004 错误是什么原因？"
 mafa ask --dry-run "RATE_LIMIT_RPS 的默认值是什么？"
 ```
 
+## 从主入口开始连续问答
+
+直接运行 `mafa`，不带参数：
+
+```bash
+mafa
+```
+
+程序每次启动都会扫描 `knowledge_base/` 的实际内容并即时生成菜单：
+
+```text
+可用知识库：
+  1. DND [dnd]
+  2. OpenSSH [openssh]
+  3. systemd [systemd]
+  ...
+请选择知识库编号（输入 /quit 退出）：
+```
+
+选中后，系统只扫描对应的实际目录，把该目录重新挂载成 Agent 所见的 `/`。例如
+选择 DND 后，OpenSSH 目录不会进入本次 Page Index；选择 OpenSSH 后，DND 文件也
+无法通过 `find`、`grep`、`search` 或 `cat` 访问。这是路径与索引级隔离，不依赖
+模型自行遵守提示词。
+
+回答完成后进程会继续等待下一个问题，模型客户端、索引和检索缓存都在该会话中
+复用。输入 `/quit`、`/exit` 或 `/q` 才退出。可用以下命令测试而不调用模型：
+
+```bash
+mafa chat --dry-run
+```
+
+这里没有需要同步维护的中央知识库清单。发现规则为：
+
+- CHM 转换目录通过其 `manifest.json` 自动成为独立知识库；
+- 顶层目录只要包含 Markdown 文件，就会自动成为独立知识库；
+- 当一个顶层目录内包含多个知识库时，在各自目录放置 `.mafa-corpus.yaml` 作为
+  边界标记。路径由标记文件所在位置推导，标记只提供可选的 `id`、`name` 和
+  `description` 展示信息。
+
+因此，新建或删除实际知识库目录后，下次启动菜单会直接反映变化；无需修改 Python
+代码或中央 YAML。`mafa ask ...` 和旧式 `mafa "问题"` 仍保留为执行一次后退出的
+脚本接口。
+
 ## 复杂结构化语料
 
 `configs/page_index.ops_demo.yaml` 对应一套多目录、跨版本、带作用域和覆盖关系的测试基准。它明确是测试语料，不是生产操作手册。
@@ -65,25 +110,77 @@ mafa ask \
 
 ## 使用模型
 
-配置 OpenAI 或兼容接口：
+复制示例文件并填写 OpenAI 或兼容接口配置。CLI 默认自动加载当前工作目录的
+`.env`，但不会覆盖已经由 shell 或进程管理器设置的环境变量：
 
 ```bash
-export OPENAI_API_KEY="..."
-export OPENAI_MODEL="gpt-4o"
+cp .env.example .env
+```
+
+```dotenv
+OPENAI_API_KEY="..."
+OPENAI_MODEL="gpt-4o"
+OPENAI_TEMPERATURE="0.0"
+OPENAI_REASONING_EFFORT="max"
+OPENAI_TOOL_MODE="auto"
 
 # 本地兼容接口可选
-export OPENAI_BASE_URL="http://localhost:8000/v1"
+OPENAI_BASE_URL="http://localhost:8000/v1"
 ```
+
+从其他目录运行时，可以通过 `--env-file /path/to/.env` 指定配置文件。
+
+`OPENAI_TOOL_MODE=auto` 默认先使用 OpenAI 兼容的原生 `tool_calls`；如果端点明确
+拒绝工具参数，会在当前客户端实例中自动切换到文本 JSON 协议。可设置为 `native`
+强制原生调用，或设置为 `text` 强制兼容模式。
+
+`OPENAI_TEMPERATURE` 默认为 `0.0`，统一作用于 Explorer、Reasoner 和 Critic。
+单次底层 `LLMRequest` 仍可显式覆盖该值。低温会减少随机发挥，但“来源文本优先于
+用户描述”主要由来源核验、提示词中的证据优先级和 Critic 审查共同保证，并不只
+依赖温度。
+
+`OPENAI_REASONING_EFFORT` 是必填配置，没有代码默认值，可设置为 `low`、`high`
+或 `max`，并统一作用于 Explorer、Reasoner 和 Critic。缺失或取值非法时，真实
+模型模式会在启动阶段直接报配置错误。
 
 运行：
 
 ```bash
+mafa
 mafa "GW-004 的原因和排查步骤是什么？"
-mafa --interactive
+mafa ask --interactive
 mafa --audit-log runs/example.jsonl "问题内容"
 ```
 
 如果 Reasoner 缺少现场事实，工作流会暂停。模型生成的命令只有通过只读白名单后才会显示；系统不会自动执行命令。
+
+### Explorer 的 Unix 工作区
+
+Explorer 看到的是根目录为 `/` 的只读虚拟工作区，可以像文件 Agent 一样调用：
+
+```text
+pwd
+ls /openssh
+find / -name "*forward*"
+grep "DisableForwarding" /openssh
+cat /openssh/current/forwarding.md
+stat /openssh/current/forwarding.md
+```
+
+这些名字是原生 function tools，不会启动 Linux Shell。相对路径和 `cd` 只在单次
+Explorer 会话内生效；所有路径最终仍由 Page Index 和 VFS 校验。`rm`、`mv`、
+`bash`、重定向、管道以及宿主机路径均不可用。
+
+每轮检索先由模型把问题拆成“证据义务、精确专名、通用规则短查询”。系统通过同一
+VFS 预执行这些模型选择的 `grep/search`，把真实结果交回 Explorer。每条
+`record_evidence` 引文还必须声明它直接支持哪些证据义务；只记录若干无关标题或
+索引行不能通过结束门禁。失败输出会显示最后一次计划及仍未覆盖的义务，便于判断是
+未找到原文、未读取正文，还是模型没有正确绑定证据。
+
+等待现场信息、最终未通过 Critic 或工作流失败时，CLI 和 QA API 都不会返回空答案。
+系统会确定性渲染一份醒目标记为“尚未/未通过最终审查”的阶段性回答，包含最后的
+暂定断言、已逐字核验的来源片段、尚缺前提和停止原因。未批准草稿中的操作建议不会
+进入这份阶段性输出。
 
 ## 建立自己的索引
 
@@ -104,6 +201,55 @@ mafa ask \
   "你的问题"
 ```
 
+## 导入 CHM
+
+CHM 不会直接交给在线 Agent。系统先在离线入库阶段解包，将其中的 HTML、目录和
+图片规范化为普通 Markdown 语料，再沿用 Page Index、VFS、Unix 工具和证据核验
+流程。
+
+Python 依赖已包含在 `requirements.txt` 中；此外需要系统提供
+`extract_chmLib`。Ubuntu 上通常可安装 `libchm-bin`，也可以通过
+`--extractor /path/to/extract_chmLib` 显式指定可执行文件。
+
+```bash
+mafa ingest-chm knowledge_base/your-example.chm \
+  --mount-name your-example \
+  --knowledge-base knowledge_base \
+  --output configs/page_index.chm.yaml
+```
+
+转换结果位于 `knowledge_base/chm_imports/your-example/`，包括：
+
+- 每个 HTML 页面对应的 UTF-8 Markdown 文件；
+- 从 `.hhc` 恢复的 `CONTENTS.md` 层级目录；
+- 本地栅格图片资源及已重写的相对链接；
+- 每页 YAML frontmatter 中的原始 CHM 名称、SHA-256、内部路径、源编码和目录路径；
+- `manifest.json` 转换统计与告警。
+
+HTML 表格会输出为 GFM 管道表格。由于 Markdown 没有 `rowspan`/`colspan`，合并
+单元格的值会被重复填入其覆盖的格子，避免静默丢失表头或数据；脚本、隐藏元素和
+危险 URL scheme 会被移除。
+
+归档名称、哈希、转换器/manifest 版本、资源复制选项和单页上限均一致时，再次导入
+会命中缓存。任一转换条件变化时使用 `--force` 原子替换原有 mount。导入过程限制
+归档大小、解包后总大小、文件数、单页大小和超时，并拒绝符号链接、越界路径与可
+携带主动内容的 SVG 资源。
+
+可通过 `--max-archive-mb`、`--max-extracted-mb`、`--max-extracted-files`、
+`--max-page-mb` 和 `--timeout` 收紧默认预算；使用 `--no-assets` 可完全跳过图片复制
+及对应图片链接。
+
+```bash
+mafa ask \
+  --page-index configs/page_index.chm.yaml \
+  --knowledge-base knowledge_base \
+  "在已导入手册中查询你的问题"
+```
+
+仓库默认忽略 `*.chm` 和 `knowledge_base/chm_imports/`。这意味着本地范例 CHM 与
+批量转换结果不会被 Git 提交；如果未来确实要版本化某一份规范化语料，应先单独
+审查许可、体积和内容，再有意调整忽略规则。
+
 手写 Page Index 时，`source` 必须相对于 `--knowledge-base`：
 
 ```yaml
@@ -123,11 +269,11 @@ mafa ask \
 
 ```text
 用户问题
-  → Explorer：VFS 导航、搜索、原文证据绑定
+  → Explorer：模型检索计划 → VFS 预检索 → Unix 工具 → 逐项原文证据绑定
   → Reasoner：基于已验证证据形成草案或请求现场信息
   → Critic：确定性检查 + 模型语义审查
   → 通过：确定性渲染最终回答
-  → 不通过：有界返回 Explorer/Reasoner，超限后明确放弃
+  → 不通过：有界返回 Explorer/Reasoner，超限后输出明确标注的阶段性回答
 ```
 
 工作流是带有界回退和挂起/恢复能力的有限状态机，不是严格 DAG。

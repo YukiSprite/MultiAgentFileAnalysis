@@ -36,6 +36,7 @@ class EvidenceItem:
     retrieval_query: str | None = None
     content_hash: str | None = None
     applicability_conditions: list[str] = field(default_factory=list)
+    supports_obligations: list[str] = field(default_factory=list)
     truncated: bool = False
     verified: bool = False
 
@@ -62,6 +63,20 @@ class ExplorationStep:
     path: str
     query: str | None = None
     result_summary: str | None = None
+
+
+@dataclass(slots=True)
+class RetrievalPlan:
+    """Model-authored evidence contract for one Explorer attempt.
+
+    The plan is deliberately kept separate from evidence: it says what must be
+    proved and which searches should be attempted, but none of its text is a
+    source-backed fact. Keeping it in shared state makes failed runs auditable.
+    """
+
+    evidence_obligations: list[str] = field(default_factory=list)
+    exact_literals: list[str] = field(default_factory=list)
+    search_queries: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -139,7 +154,7 @@ class DiagnosisState:
     - user inputs: user_query, user_context, runtime_context;
     - retrieval trace: exploration_log, evidence;
     - reasoning and review: diagnosis_draft, critic_report, critic_notes;
-    - suspension/finalization: human_request, final_answer, errors.
+    - suspension/finalization: human_request, final_answer, partial_answer, errors.
     """
 
     user_query: str
@@ -150,11 +165,14 @@ class DiagnosisState:
     runtime_context: list[RuntimeContextItem] = field(default_factory=list)
     exploration_log: list[ExplorationStep] = field(default_factory=list)
     evidence: list[EvidenceItem] = field(default_factory=list)
+    retrieval_plan: RetrievalPlan | None = None
+    uncovered_evidence_obligations: list[str] = field(default_factory=list)
     diagnosis_draft: DiagnosisDraft | None = None
     critic_notes: list[str] = field(default_factory=list)
     critic_report: CriticReport | None = None
     human_request: HumanRequest | None = None
     final_answer: str | None = None
+    partial_answer: str | None = None
     errors: list[str] = field(default_factory=list)
     workflow_iterations: int = 0
     exploration_attempts: int = 0

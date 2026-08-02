@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from multi_agent_file_analysis.config import AppConfig
@@ -91,6 +92,34 @@ class SearchResult:
 
 
 @dataclass(slots=True)
+class FindEntry:
+    path: str
+    kind: str
+    description: str
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class FindResult:
+    path: str
+    name: str
+    entries: list[FindEntry]
+    truncated: bool = False
+    nodes_searched: int = 0
+
+
+@dataclass(slots=True)
+class StatResult:
+    path: str
+    kind: str
+    description: str
+    title: str | None = None
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, str] = field(default_factory=dict)
+    size_bytes: int | None = None
+
+
+@dataclass(slots=True)
 class EvidenceVerification:
     path: str
     quote: str
@@ -121,6 +150,9 @@ class VirtualFileSystem:
         self._repo = repository
         self._config = config
         self._policy = policy or VfsAccessPolicy()
+        self._catalog: dict[str, list[int]] | None = None
+        self._catalog_nodes: list[IndexNode] = []
+        self._catalog_truncated = False
 
     def v_ls(
         self,
@@ -234,6 +266,8 @@ class VirtualFileSystem:
         *,
         case_sensitive: bool = False,
         whole_word: bool = False,
+        context_lines: int | None = None,
+        limit: int | None = None,
     ) -> GrepResult:
         """Search a file or an indexed directory scope using a literal string."""
         self._policy.assert_can_search(path, pattern)
@@ -242,9 +276,20 @@ class VirtualFileSystem:
         if whole_word:
             expression = rf"(?<!\w){expression}(?!\w)"
         matcher = re.compile(expression, flags)
+        effective_context = min(
+            self._config.grep_context_lines
+            if context_lines is None
+            else max(0, context_lines),
+            self._config.grep_context_lines,
+        )
+        requested_limit = self._config.max_grep_hits if limit is None else limit
+        effective_limit = min(requested_limit, self._config.max_grep_hits)
+        if effective_limit <= 0:
+            raise VirtualFileSystemError("grep limit must be greater than zero")
 
         hits: list[GrepHit] = []
         files_searched = 0
+        chars_searched = 0
         truncated = False
         for node in self._repo.iter_files(path):
             if files_searched >= self._config.max_search_files:
@@ -252,20 +297,30 @@ class VirtualFileSystem:
                 break
             files_searched += 1
             _, content = self._read_file(node.path)
-            if len(content) > self._config.max_search_file_chars:
-                content = content[: self._config.max_search_file_chars]
+            content = self._mask_frontmatter(content)
+            remaining = self._config.max_search_total_chars - chars_searched
+            searchable_chars = min(
+                self._config.max_search_file_chars,
+                max(0, remaining),
+            )
+            if searchable_chars == 0:
                 truncated = True
+                break
+            if len(content) > searchable_chars:
+                content = content[:searchable_chars]
+                truncated = True
+            chars_searched += len(content)
             lines = content.splitlines()
             for index, line in enumerate(lines):
                 if not matcher.search(line):
                     continue
-                if len(hits) >= self._config.max_grep_hits:
+                if len(hits) >= effective_limit:
                     truncated = True
                     break
-                start = max(0, index - self._config.grep_context_lines)
+                start = max(0, index - effective_context)
                 end = min(
                     len(lines),
-                    index + self._config.grep_context_lines + 1,
+                    index + effective_context + 1,
                 )
                 context = [f"{i + 1}: {lines[i]}" for i in range(start, end)]
                 hits.append(
@@ -280,7 +335,7 @@ class VirtualFileSystem:
                         context_end=end,
                     )
                 )
-            if len(hits) >= self._config.max_grep_hits:
+            if len(hits) >= effective_limit:
                 break
 
         return GrepResult(
@@ -309,10 +364,21 @@ class VirtualFileSystem:
         if not terms:
             raise VirtualFileSystemError("Search query has no usable terms")
 
-        candidates: list[SearchHit] = []
+        hits: list[SearchHit] = []
         files_searched = 0
+        chars_searched = 0
         any_truncated = False
-        for node in self._repo.iter_files(scope):
+        candidate_nodes, candidates_truncated = self._catalog_candidates(
+            query,
+            scope=scope,
+            filters=filters,
+        )
+        nodes = (
+            candidate_nodes
+            if candidate_nodes is not None
+            else self._repo.iter_files(scope)
+        )
+        for node in nodes:
             if files_searched >= self._config.max_search_files:
                 any_truncated = True
                 break
@@ -320,38 +386,69 @@ class VirtualFileSystem:
                 continue
             files_searched += 1
             _, content = self._read_file(node.path)
-            if len(content) > self._config.max_search_file_chars:
-                content = content[: self._config.max_search_file_chars]
+            content = self._mask_frontmatter(content)
+            remaining = self._config.max_search_total_chars - chars_searched
+            searchable_chars = min(
+                self._config.max_search_file_chars,
+                max(0, remaining),
+            )
+            if searchable_chars == 0:
                 any_truncated = True
+                break
+            if len(content) > searchable_chars:
+                content = content[:searchable_chars]
+                any_truncated = True
+            chars_searched += len(content)
 
             metadata_text = self._node_search_text(node).casefold()
             content_folded = content.casefold()
-            score = 0.0
-            matched: list[str] = []
-            first_position: int | None = None
+            term_matches: list[tuple[float, float, str, int | None]] = []
             for term in terms:
                 folded = term.casefold()
                 metadata_count = metadata_text.count(folded)
                 content_count = content_folded.count(folded)
                 if metadata_count or content_count:
-                    matched.append(term)
-                    score += min(metadata_count, 3) * 4.0
-                    score += min(content_count, 8) * 1.5
+                    specificity = self._term_specificity(term)
+                    contribution = (
+                        min(metadata_count, 3) * 4.0 * specificity
+                        + min(content_count, 8) * 1.5 * specificity
+                    )
                     if node.path.casefold().find(folded) >= 0:
-                        score += 5.0
+                        contribution += 5.0 * specificity
                     position = content_folded.find(folded)
-                    if position >= 0 and (
-                        first_position is None or position < first_position
-                    ):
-                        first_position = position
-            if not matched:
+                    term_matches.append(
+                        (
+                            specificity,
+                            contribution,
+                            term,
+                            position if position >= 0 else None,
+                        )
+                    )
+            if not term_matches:
                 continue
 
+            # Long natural-language questions generate overlapping CJK n-grams.
+            # Score only the most specific matches so dozens of generic pairs do
+            # not overwhelm one distinctive named rule.
+            term_matches.sort(
+                key=lambda item: (item[0], item[1], len(item[2])),
+                reverse=True,
+            )
+            selected_matches = term_matches[:12]
+            score = sum(item[1] for item in selected_matches)
+            matched = [item[2] for item in selected_matches]
+            content_matches = [
+                item for item in selected_matches if item[3] is not None
+            ]
+            best_position = self._best_excerpt_position(
+                content_folded,
+                content_matches,
+            )
             excerpt, line_start, line_end = self._excerpt(
                 content,
-                first_position,
+                best_position,
             )
-            candidates.append(
+            hits.append(
                 SearchHit(
                     path=node.path,
                     score=score,
@@ -364,14 +461,99 @@ class VirtualFileSystem:
                 )
             )
 
-        candidates.sort(key=lambda hit: (-hit.score, hit.path))
-        truncated = len(candidates) > effective_limit or any_truncated
+        hits.sort(key=lambda hit: (-hit.score, hit.path))
+        truncated = (
+            len(hits) > effective_limit
+            or any_truncated
+            or candidates_truncated
+            or self._catalog_truncated
+        )
         return SearchResult(
             query=query,
             scope=scope,
-            hits=candidates[:effective_limit],
+            hits=hits[:effective_limit],
             truncated=truncated,
             files_searched=files_searched,
+        )
+
+    def v_find(
+        self,
+        path: str = "/",
+        *,
+        name: str = "*",
+        kind: str | None = None,
+        limit: int | None = None,
+        filters: dict[str, str] | None = None,
+    ) -> FindResult:
+        """Find indexed nodes by POSIX-style glob and optional metadata."""
+        self._policy.assert_can_list(path)
+        if not name or len(name) > 256:
+            raise VirtualFileSystemError("Find name must contain 1-256 characters")
+        if kind not in {None, "file", "directory"}:
+            raise VirtualFileSystemError("Find kind must be file or directory")
+        effective_limit = min(
+            limit or self._config.max_search_results,
+            self._config.max_search_results,
+        )
+        self._policy.assert_can_paginate(0, effective_limit)
+
+        entries: list[FindEntry] = []
+        nodes_searched = 0
+        truncated = False
+        for node in self._repo.iter_nodes(path):
+            if nodes_searched >= self._config.max_search_files:
+                truncated = True
+                break
+            nodes_searched += 1
+            node_kind = str(node.kind)
+            if kind and node_kind != kind:
+                continue
+            if filters and not self._matches_filters(node, filters):
+                continue
+            basename = node.path.rstrip("/").rsplit("/", 1)[-1] or "/"
+            if not (
+                fnmatchcase(basename.casefold(), name.casefold())
+                or fnmatchcase(node.path.casefold(), name.casefold())
+            ):
+                continue
+            if len(entries) >= effective_limit:
+                truncated = True
+                break
+            entries.append(
+                FindEntry(
+                    path=node.path,
+                    kind=node_kind,
+                    description=node.description,
+                    metadata=dict(node.metadata),
+                )
+            )
+
+        return FindResult(
+            path=path,
+            name=name,
+            entries=entries,
+            truncated=truncated,
+            nodes_searched=nodes_searched,
+        )
+
+    def v_stat(self, path: str) -> StatResult:
+        """Return metadata for one indexed virtual path without exposing host paths."""
+        self._policy.assert_can_list(path)
+        node = self._repo.get_node(path)
+        size_bytes = None
+        if node.kind == NodeKind.FILE:
+            source_path = self._repo.resolve_source_path(path)
+            if not source_path.exists() or not source_path.is_file():
+                raise VirtualFileSystemError(f"Source file not found for {path}")
+            size_bytes = source_path.stat().st_size
+        return StatResult(
+            path=node.path,
+            kind=str(node.kind),
+            description=node.description,
+            title=node.title,
+            tags=list(node.tags),
+            metadata=dict(node.metadata),
+            size_bytes=size_bytes,
         )
 
     def verify_quote(self, path: str, quote: str) -> EvidenceVerification:
@@ -427,6 +609,155 @@ class VirtualFileSystem:
                 errors="replace",
             )
 
+    def _catalog_candidates(
+        self,
+        query: str,
+        *,
+        scope: str,
+        filters: dict[str, str] | None = None,
+    ) -> tuple[list[IndexNode] | None, bool]:
+        """Rank a bounded candidate set with the lazy inverted token catalog."""
+        self._ensure_catalog()
+        if self._catalog is None:
+            return None, False
+        query_terms = self._catalog_query_terms(query)
+        if not query_terms:
+            return None, False
+
+        match_scores: dict[int, float] = {}
+        had_usable_key = False
+        key_weights: dict[str, float] = {}
+        for term in query_terms:
+            for key in self._catalog_term_keys(term):
+                # Exact ASCII tokens carry more signal than their trigrams. CJK
+                # text is represented by bigrams, so pages matching several
+                # query bigrams naturally rise above incidental one-key matches.
+                weight = 4.0 if key.startswith("a:") else 1.0
+                key_weights[key] = max(key_weights.get(key, 0.0), weight)
+        for key, weight in key_weights.items():
+            postings = self._catalog.get(key)
+            if not postings:
+                continue
+            had_usable_key = True
+            for identifier in postings:
+                match_scores[identifier] = (
+                    match_scores.get(identifier, 0.0) + weight
+                )
+        if not had_usable_key:
+            return [], False
+
+        normalized_scope = scope.rstrip("/") or "/"
+        prefix = normalized_scope + "/" if normalized_scope != "/" else "/"
+        ranked: list[tuple[float, IndexNode]] = []
+        for identifier, score in match_scores.items():
+            node = self._catalog_nodes[identifier]
+            if not (
+                normalized_scope == "/"
+                or node.path == normalized_scope
+                or node.path.startswith(prefix)
+            ):
+                continue
+            if filters and not self._matches_filters(node, filters):
+                continue
+            ranked.append((score, node))
+        ranked.sort(key=lambda item: (-item[0], item[1].path))
+        truncated = len(ranked) > self._config.max_search_candidates
+        return (
+            [node for _, node in ranked[: self._config.max_search_candidates]],
+            truncated,
+        )
+
+    def _ensure_catalog(self) -> None:
+        if self._catalog is not None:
+            return
+        catalog: dict[str, list[int]] = {}
+        nodes: list[IndexNode] = []
+        chars_indexed = 0
+        for node in self._repo.iter_files("/"):
+            if len(nodes) >= self._config.max_search_files:
+                self._catalog_truncated = True
+                break
+            try:
+                _, content = self._read_file(node.path)
+            except VirtualFileSystemError:
+                self._catalog_truncated = True
+                continue
+            content = self._mask_frontmatter(content)
+            remaining = self._config.max_search_total_chars - chars_indexed
+            searchable_chars = min(
+                self._config.max_search_file_chars,
+                max(0, remaining),
+            )
+            if searchable_chars == 0:
+                self._catalog_truncated = True
+                break
+            if len(content) > searchable_chars:
+                content = content[:searchable_chars]
+                self._catalog_truncated = True
+            chars_indexed += len(content)
+            searchable = self._node_search_text(node) + "\n" + content
+            identifier = len(nodes)
+            nodes.append(node)
+            for key in self._catalog_text_keys(searchable):
+                catalog.setdefault(key, []).append(identifier)
+        self._catalog = catalog
+        self._catalog_nodes = nodes
+
+    @staticmethod
+    def _catalog_query_terms(query: str) -> list[str]:
+        ascii_terms = re.findall(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*", query)
+        cjk_terms = re.findall(r"[\u3400-\u9fff]{2,}", query)
+        return list(dict.fromkeys([*ascii_terms, *cjk_terms]))
+
+    @classmethod
+    def _catalog_text_keys(cls, text: str) -> set[str]:
+        keys: set[str] = set()
+        for term in re.findall(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*", text.casefold()):
+            keys.update(cls._catalog_term_keys(term))
+        for chunk in re.findall(r"[\u3400-\u9fff]+", text):
+            keys.update(cls._catalog_term_keys(chunk))
+        return keys
+
+    @staticmethod
+    def _catalog_term_keys(term: str) -> list[str]:
+        folded = term.casefold()
+        cjk = re.sub(r"[^\u3400-\u9fff]", "", folded)
+        if cjk:
+            if len(cjk) == 1:
+                return ["c:" + cjk]
+            return [
+                "c:" + cjk[index : index + 2]
+                for index in range(len(cjk) - 1)
+            ]
+        if len(folded) < 3:
+            return ["a:" + folded]
+        return [
+            "a:" + folded,
+            *(
+                "g:" + folded[index : index + 3]
+                for index in range(len(folded) - 2)
+            ),
+        ]
+
+    @staticmethod
+    def _mask_frontmatter(content: str) -> str:
+        """Blank YAML frontmatter while preserving downstream line numbers."""
+        lines = content.splitlines(keepends=True)
+        if not lines or lines[0].strip() != "---":
+            return content
+        closing = next(
+            (
+                index
+                for index, line in enumerate(lines[1:501], start=1)
+                if line.strip() in {"---", "..."}
+            ),
+            None,
+        )
+        if closing is None:
+            return content
+        masked = ["\n" if line.endswith("\n") else "" for line in lines[: closing + 1]]
+        return "".join([*masked, *lines[closing + 1 :]])
+
     @staticmethod
     def _node_search_text(node: IndexNode) -> str:
         values = [
@@ -452,7 +783,9 @@ class VirtualFileSystem:
     @staticmethod
     def _query_terms(query: str) -> list[str]:
         ascii_terms = re.findall(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*", query)
-        cjk_chunks = re.findall(r"[\u3400-\u9fff]{2,}", query)
+        cjk_chunks = list(
+            dict.fromkeys(re.findall(r"[\u3400-\u9fff]{2,}", query))
+        )
         stopwords = {"the", "and", "what", "why", "how", "是什么", "怎么", "如何"}
         terms: list[str] = []
         for term in ascii_terms:
@@ -461,13 +794,96 @@ class VirtualFileSystem:
         for chunk in cjk_chunks:
             if chunk not in stopwords:
                 terms.append(chunk)
-            if len(chunk) > 2:
+        for width in (3, 2):
+            for chunk in cjk_chunks:
+                if len(chunk) < width:
+                    continue
+                positions = range(len(chunk) - width + 1)
+                # Bound pathological long user input while sampling the whole
+                # phrase rather than indexing only its beginning.
+                if len(positions) > 16:
+                    last = len(positions) - 1
+                    positions = sorted({round(last * index / 15) for index in range(16)})
                 terms.extend(
-                    chunk[index : index + 2]
-                    for index in range(len(chunk) - 1)
-                    if chunk[index : index + 2] not in stopwords
+                    chunk[index : index + width]
+                    for index in positions
+                    if chunk[index : index + width] not in stopwords
                 )
-        return list(dict.fromkeys(terms))
+        return list(dict.fromkeys(terms))[:128]
+
+    @staticmethod
+    def _term_specificity(term: str) -> float:
+        cjk = re.sub(r"[^\u3400-\u9fff]", "", term)
+        if cjk:
+            functional = set("的一是了个该会不受于在内有和或与及其这那")
+            informative = sum(character not in functional for character in cjk)
+            return float(min(len(cjk), 6)) / 2.0 + informative / 4.0
+        return 1.0
+
+    @staticmethod
+    def _best_excerpt_position(
+        content_folded: str,
+        matches: list[tuple[float, float, str, int | None]],
+    ) -> int | None:
+        """Choose the passage where the most distinct query terms co-occur."""
+        searchable = [
+            (specificity, term.casefold())
+            for specificity, _, term, position in matches
+            if position is not None
+        ]
+        if not searchable:
+            return None
+
+        occurrences: list[tuple[float, str, list[int]]] = []
+        anchors: list[int] = []
+        for specificity, term in searchable:
+            term_positions: list[int] = []
+            start = 0
+            for _ in range(16):
+                position = content_folded.find(term, start)
+                if position < 0:
+                    break
+                term_positions.append(position)
+                anchors.append(position)
+                start = position + max(1, len(term))
+            occurrences.append((specificity, term, term_positions))
+        if not anchors:
+            return None
+
+        radius = 900
+        best_position = min(anchors)
+        best_rank: tuple[float, int, int, int, int] | None = None
+        for anchor in anchors:
+            start = max(0, anchor - radius)
+            end = min(len(content_folded), anchor + radius)
+            present: list[tuple[float, str, int]] = []
+            for specificity, term, positions in occurrences:
+                nearby = [position for position in positions if start <= position < end]
+                if nearby:
+                    present.append(
+                        (
+                            specificity,
+                            term,
+                            min(nearby, key=lambda position: abs(position - anchor)),
+                        )
+                    )
+            absolute_positions = [item[2] for item in present]
+            span = (
+                max(absolute_positions) - min(absolute_positions)
+                if absolute_positions
+                else len(content_folded)
+            )
+            rank = (
+                sum(item[0] for item in present),
+                len(present),
+                -span,
+                -sum(abs(item[2] - anchor) for item in present),
+                -anchor,
+            )
+            if best_rank is None or rank > best_rank:
+                best_rank = rank
+                best_position = anchor
+        return best_position
 
     @staticmethod
     def _nearest_heading(lines: list[str], index: int) -> str | None:
@@ -481,13 +897,17 @@ class VirtualFileSystem:
     def _excerpt(
         content: str,
         position: int | None,
-        context_lines: int = 2,
+        context_lines: int = 5,
     ) -> tuple[str, int | None, int | None]:
         lines = content.splitlines()
         if not lines:
             return "", None, None
         if position is None:
-            start = 0
+            first_content = next(
+                (index for index, line in enumerate(lines) if line.strip()),
+                0,
+            )
+            start = max(0, first_content - context_lines)
         else:
             line_index = content.count("\n", 0, position)
             start = max(0, line_index - context_lines)

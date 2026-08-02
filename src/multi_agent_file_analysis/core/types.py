@@ -71,6 +71,17 @@ class EvidenceKind(StrEnum):
 class ToolName(StrEnum):
     """Virtual browsing tools available to Explorer."""
 
+    UNKNOWN = "unknown"
+    PWD = "pwd"
+    CD = "cd"
+    LS = "ls"
+    FIND = "find"
+    STAT = "stat"
+    CAT = "cat"
+    HEAD = "head"
+    TAIL = "tail"
+    GREP = "grep"
+    SEARCH = "search"
     V_LS = "v_ls"
     V_CAT = "v_cat"
     V_GREP = "v_grep"
