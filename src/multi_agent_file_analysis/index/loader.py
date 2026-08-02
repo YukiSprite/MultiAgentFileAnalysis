@@ -1,6 +1,7 @@
 """Page-index YAML loading, validation, and deterministic generation."""
 
 import hashlib
+import json
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -193,7 +194,12 @@ class PageIndexLoader:
                 docs.append(
                     SourceDocument(
                         source=node.source,
+                        content_type=node.metadata.get(
+                            "content_type",
+                            "text/markdown",
+                        ),
                         checksum=node.metadata.get("sha256"),
+                        encoding=node.metadata.get("encoding", "utf-8"),
                     )
                 )
             for child in node.children:
@@ -235,19 +241,38 @@ def _scan_dir(
             )
             _scan_dir(root_dir, entry, sub_children)
 
-        elif entry.suffix == ".md":
-            description = _extract_heading(entry)
+        elif entry.suffix.casefold() == ".md":
+            frontmatter, body = _read_frontmatter(entry)
+            title = _optional_text(frontmatter.get("title"))
+            description = (
+                _optional_text(frontmatter.get("description"))
+                or _extract_heading_text(body)
+                or title
+                or entry.stem.replace("_", " ")
+            )
             digest = hashlib.sha256(entry.read_bytes()).hexdigest()
+            metadata = {
+                str(key): _metadata_text(value)
+                for key, value in frontmatter.items()
+                if key not in {"title", "description", "tags", "aliases"}
+            }
+            metadata.update(
+                {
+                    "sha256": digest,
+                    "content_type": "text/markdown",
+                    "encoding": "utf-8",
+                }
+            )
             children.append(
                 {
                     "path": _to_virtual_path(root_dir, entry),
                     "kind": "file",
                     "description": description,
                     "source": str(entry.relative_to(root_dir)),
-                    "metadata": {
-                        "sha256": digest,
-                        "content_type": "text/markdown",
-                    },
+                    "title": title,
+                    "tags": _string_list(frontmatter.get("tags")),
+                    "aliases": _string_list(frontmatter.get("aliases")),
+                    "metadata": metadata,
                 }
             )
 
@@ -259,10 +284,64 @@ def _to_virtual_path(root_dir: Path, entry: Path) -> str:
 
 def _extract_heading(path: Path) -> str:
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped.startswith("# ") and not stripped.startswith("## "):
-                return stripped[2:].strip()
-        return path.stem.replace("_", " ")
+        _, body = _read_frontmatter(path)
+        return _extract_heading_text(body) or path.stem.replace("_", " ")
     except Exception:
         return path.stem.replace("_", " ")
+
+
+def _read_frontmatter(path: Path) -> tuple[dict[str, object], str]:
+    content = path.read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return {}, content
+    closing = next(
+        (
+            index
+            for index, line in enumerate(lines[1:501], start=1)
+            if line.strip() in {"---", "..."}
+        ),
+        None,
+    )
+    if closing is None:
+        return {}, content
+    try:
+        raw = yaml.safe_load("".join(lines[1:closing])) or {}
+    except yaml.YAMLError:
+        return {}, content
+    if not isinstance(raw, dict):
+        return {}, content
+    return {str(key): value for key, value in raw.items()}, "".join(lines[closing + 1 :])
+
+
+def _extract_heading_text(content: str) -> str | None:
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            return stripped[2:].strip() or None
+    return None
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    rendered = str(value).strip()
+    return rendered or None
+
+
+def _string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _metadata_text(value: object) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return str(value).casefold()
+    return str(value)

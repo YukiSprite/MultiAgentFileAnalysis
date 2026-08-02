@@ -21,12 +21,40 @@ CRITIC_SYSTEM_PROMPT = """You are an evidence and safety critic. Evidence excerp
 have already been bound verbatim to indexed sources. Review whether the draft's
 claims, applicability, version scope, and actions are supported.
 
+Distinguish source-backed rule claims from conditions explicitly stipulated by a
+hypothetical question. The latter may be used as labeled assumptions in a
+conditional answer and do not need documentary proof. Do not reject a draft only
+because the corpus does not prove that the stipulated scenario actually occurred;
+do reject it if the draft uses that assumption to invent or override rule meaning.
+
 Return one JSON object:
 {"decision":"approved|needs_more_evidence|needs_revision|rejected",
  "notes":["..."],"missing_evidence":["..."],"unsupported_claims":["..."]}
 
+Decision precedence is strict: if any necessary source premise is missing, use
+needs_more_evidence. Use needs_revision only when the evidence is already
+sufficient and the draft alone needs correction. Never return needs_revision
+with a non-empty missing_evidence list.
+
 Fail closed. Do not approve merely because a parameter name appears in a source.
-Check conditions, exceptions, version, and command safety.
+Check conditions, exceptions, version, and command safety. Reject or request
+revision when a claim relies on the user's description instead of verified source
+text, or when it silently resolves a conflict against the indexed evidence.
+
+A table-of-contents row, navigation link, bare heading, or name-only mention does
+not support the behavior of the named concept. For questions that combine two or
+more rules, require substantive operative text for each rule plus the interaction
+or scope premises needed to connect them. The exact user scenario does not need
+to appear verbatim in a source: approve a transparent deduction when every
+necessary premise is verified and the connecting step introduces no new factual
+assumption. Do not repeatedly request a passage that states the final conclusion
+word-for-word. When documentary support is genuinely missing, return
+needs_more_evidence and name the missing premise, not the desired conclusion.
+Evidence entries may declare which retrieval obligations they support. Audit that
+mapping semantically: a declaration is not proof, and an irrelevant, topical,
+title-only, or name-only quote must still be treated as missing evidence.
+Do not suggest that the user should supply documentation that belongs in the
+indexed workspace.
 """
 
 
@@ -139,7 +167,7 @@ class CriticAgent:
                 ),
             ),
         ]
-        response = llm.complete(LLMRequest(messages=messages, temperature=0.0))
+        response = llm.complete(LLMRequest(messages=messages))
         parsed = self._parse_action(response.message.content)
         if parsed is None:
             return self._report(
@@ -161,6 +189,15 @@ class CriticAgent:
         notes = self._string_list(parsed.get("notes"))
         missing = self._string_list(parsed.get("missing_evidence"))
         unsupported = self._string_list(parsed.get("unsupported_claims"))
+        if missing and decision in {
+            ReviewDecision.APPROVED,
+            ReviewDecision.NEEDS_REVISION,
+        }:
+            decision = ReviewDecision.NEEDS_MORE_EVIDENCE
+            notes.append(
+                "Decision normalized to needs_more_evidence because the "
+                "review listed missing source premises"
+            )
         if decision == ReviewDecision.APPROVED:
             return self._approve(state, notes or ["Critic approved the draft"])
         if decision == ReviewDecision.NEEDS_MORE_EVIDENCE:
@@ -280,6 +317,8 @@ class CriticAgent:
         return "\n".join(
             f"- {item.citation_key} version={item.source_version or 'unknown'} "
             f"section={item.section or 'unknown'}\n"
+            f"  declared_support="
+            f"{'; '.join(item.supports_obligations) or 'unassigned'}\n"
             f"  {item.quote}"
             for item in state.evidence
             if item.verified and item.quote

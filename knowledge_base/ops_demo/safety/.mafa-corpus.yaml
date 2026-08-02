@@ -1,0 +1,3 @@
+id: safety
+name: 诊断安全规则
+description: 只读诊断命令策略。

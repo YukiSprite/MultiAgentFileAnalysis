@@ -21,6 +21,7 @@ from multi_agent_file_analysis.graph.nodes import (
     ReasonerNode,
 )
 from multi_agent_file_analysis.graph.plan import WorkflowEdge, WorkflowPlan
+from multi_agent_file_analysis.graph.partial import render_partial_answer
 from multi_agent_file_analysis.graph.state import DiagnosisState, RuntimeContextItem
 from multi_agent_file_analysis.llm import LLMClient
 
@@ -141,6 +142,7 @@ class DiagnosisWorkflow:
 
         state.resume_count += 1
         state.human_request = None
+        state.partial_answer = None
         state.next_stage = WorkflowStage.REASON
         state.status = WorkflowStatus.RUNNING
         self._emit(
@@ -180,6 +182,7 @@ class DiagnosisWorkflow:
 
             if state.status == WorkflowStatus.WAITING_FOR_HUMAN:
                 state.next_stage = WorkflowStage.REASON
+                state.partial_answer = render_partial_answer(state)
                 return state
             if state.status == WorkflowStatus.FAILED:
                 return self._finish_failed(state, context)
@@ -213,6 +216,7 @@ class DiagnosisWorkflow:
                         AuditEventType.WORKFLOW_FAILED,
                         state.last_transition_reason,
                     )
+                    state.partial_answer = render_partial_answer(state)
                     return state
 
             state.last_transition_reason = result.message
@@ -263,6 +267,7 @@ class DiagnosisWorkflow:
         state.stage = WorkflowStage.FINALIZE
         state.next_stage = None
         state.status = WorkflowStatus.COMPLETED
+        state.partial_answer = None
         self._emit(
             context,
             AuditEventType.WORKFLOW_FINISHED,
@@ -277,6 +282,7 @@ class DiagnosisWorkflow:
     ) -> DiagnosisState:
         state.status = WorkflowStatus.FAILED
         state.next_stage = None
+        state.partial_answer = render_partial_answer(state)
         self._emit(
             context,
             AuditEventType.WORKFLOW_FAILED,

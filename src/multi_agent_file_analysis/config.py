@@ -13,6 +13,7 @@ class AppConfig:
     page_index_path: Path
     knowledge_base_root: Path
     run_mode: RunMode = RunMode.INTERACTIVE
+    env_file_path: Path | None = None
     audit_log_path: Path | None = None
     max_file_chars: int = 12_000
     max_read_lines: int = 240
@@ -20,8 +21,12 @@ class AppConfig:
     grep_context_lines: int = 3
     max_grep_hits: int = 50
     max_search_results: int = 20
-    max_search_files: int = 1_000
-    max_search_file_chars: int = 250_000
+    max_search_files: int = 20_000
+    max_search_candidates: int = 750
+    # Keep every accepted source file searchable.  A separate aggregate budget
+    # bounds one catalog build/search across many files.
+    max_search_file_chars: int = 5_000_000
+    max_search_total_chars: int = 250_000_000
     max_source_file_bytes: int = 5_000_000
     max_explorer_turns: int = 12
     max_workflow_iterations: int = 16
@@ -49,7 +54,9 @@ class AppConfig:
             "max_grep_hits": self.max_grep_hits,
             "max_search_results": self.max_search_results,
             "max_search_files": self.max_search_files,
+            "max_search_candidates": self.max_search_candidates,
             "max_search_file_chars": self.max_search_file_chars,
+            "max_search_total_chars": self.max_search_total_chars,
             "max_source_file_bytes": self.max_source_file_bytes,
             "max_explorer_turns": self.max_explorer_turns,
             "max_workflow_iterations": self.max_workflow_iterations,

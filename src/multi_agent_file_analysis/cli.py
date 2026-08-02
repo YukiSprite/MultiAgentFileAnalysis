@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -24,6 +25,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "index":
         return _cmd_index(args)
+    if args.command == "ingest-chm":
+        return _cmd_ingest_chm(args)
+    if args.command == "chat":
+        return _cmd_chat(args)
     if args.command == "ask":
         return _cmd_ask(args)
     parser.print_help()
@@ -33,9 +38,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _normalize_argv(args: list[str]) -> list[str]:
     """Keep the documented `mafa [flags] question` shorthand working."""
     if not args:
-        return args
+        return ["chat"]
     first = args[0]
-    if first in {"ask", "index", "-h", "--help"}:
+    if first in {"ask", "chat", "index", "ingest-chm", "-h", "--help"}:
         return args
     return ["ask", *args]
 
@@ -61,6 +66,108 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("configs/page_index.yaml"),
         help="Generated Page Index path",
+    )
+
+    chm_parser = sub.add_parser(
+        "ingest-chm",
+        help="Safely convert a local CHM archive into indexed Markdown",
+    )
+    chm_parser.add_argument("source", type=Path, help="Local .chm archive")
+    chm_parser.add_argument(
+        "--knowledge-base",
+        type=Path,
+        default=Path("knowledge_base"),
+        help="Knowledge-base root receiving chm_imports/<mount>",
+    )
+    chm_parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("configs/page_index.chm.yaml"),
+        help="Page Index rebuilt after conversion",
+    )
+    chm_parser.add_argument(
+        "--mount-name",
+        default=None,
+        help="Safe directory name below knowledge_base/chm_imports",
+    )
+    chm_parser.add_argument(
+        "--extractor",
+        default="extract_chmLib",
+        help="Path or command name for the chmlib extractor",
+    )
+    chm_parser.add_argument(
+        "--no-assets",
+        action="store_true",
+        help="Do not copy local images referenced by converted pages",
+    )
+    chm_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing mount when source or conversion settings changed",
+    )
+    chm_parser.add_argument(
+        "--max-archive-mb",
+        type=int,
+        default=512,
+        help="Maximum accepted CHM archive size in MiB",
+    )
+    chm_parser.add_argument(
+        "--max-extracted-mb",
+        type=int,
+        default=2048,
+        help="Maximum total extracted size in MiB",
+    )
+    chm_parser.add_argument(
+        "--max-extracted-files",
+        type=int,
+        default=50_000,
+        help="Maximum extracted file count",
+    )
+    chm_parser.add_argument(
+        "--max-page-mb",
+        type=int,
+        default=10,
+        help="Maximum size of one HTML page, TOC, or copied image in MiB",
+    )
+    chm_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=180,
+        help="Extraction timeout in seconds",
+    )
+
+    chat_parser = sub.add_parser(
+        "chat",
+        help="Choose one corpus and keep asking questions in an isolated session",
+    )
+    chat_parser.add_argument(
+        "--knowledge-base",
+        type=Path,
+        default=Path("knowledge_base"),
+        help="Root scanned dynamically for selectable corpus directories",
+    )
+    chat_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run bounded lexical retrieval without calling an LLM",
+    )
+    chat_parser.add_argument(
+        "--audit-log",
+        type=Path,
+        default=None,
+        help="Append all questions in this session to one JSONL audit log",
+    )
+    chat_parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help="Load model configuration without overriding shell variables",
+    )
+    chat_parser.add_argument(
+        "--max-chars",
+        type=int,
+        default=12_000,
+        help="Maximum characters returned by one file read",
     )
 
     ask_parser = sub.add_parser("ask", help="Ask the indexed knowledge base")
@@ -94,6 +201,12 @@ def _add_ask_flags(parser: argparse.ArgumentParser) -> None:
         help="Append structured audit events to this JSONL file",
     )
     parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help="Load model configuration from this file without overriding shell variables",
+    )
+    parser.add_argument(
         "--max-chars",
         type=int,
         default=12_000,
@@ -125,6 +238,136 @@ def _cmd_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ingest_chm(args: argparse.Namespace) -> int:
+    from multi_agent_file_analysis.ingestion import (
+        ChmExtractor,
+        ChmImporter,
+        ChmImportLimits,
+    )
+
+    mib = 1024 * 1024
+    limits = ChmImportLimits(
+        max_archive_bytes=args.max_archive_mb * mib,
+        max_extracted_bytes=args.max_extracted_mb * mib,
+        max_extracted_files=args.max_extracted_files,
+        max_page_bytes=args.max_page_mb * mib,
+        extraction_timeout_seconds=args.timeout,
+    )
+    try:
+        limits.validate()
+        extractor = ChmExtractor(binary=args.extractor, limits=limits)
+        result = ChmImporter(extractor=extractor, limits=limits).import_archive(
+            args.source,
+            args.knowledge_base,
+            args.output,
+            mount_name=args.mount_name,
+            copy_assets=not args.no_assets,
+            force=args.force,
+        )
+    except Exception as exc:
+        print(f"CHM ingestion failed: {exc}", file=sys.stderr)
+        return 2
+
+    mode = "cache hit" if result.cache_hit else "converted"
+    print(f"CHM ingestion complete ({mode})")
+    print(f"Markdown root: {result.output_directory}")
+    print(f"Page Index: {result.index_path}")
+    print(f"Pages converted: {result.pages_converted}")
+    print(f"Assets copied: {result.assets_copied}")
+    print(f"TOC entries: {result.toc_entries}")
+    print(f"Missing TOC targets: {result.missing_toc_pages}")
+    print(f"Indexed documents: {result.indexed_documents}")
+    if result.warnings:
+        print("Warnings:")
+        for warning in result.warnings[:20]:
+            print(f"  - {warning}")
+        if len(result.warnings) > 20:
+            print(f"  - ... {len(result.warnings) - 20} more in manifest.json")
+    return 0
+
+
+def _cmd_chat(args: argparse.Namespace) -> int:
+    from multi_agent_file_analysis.corpora import CorpusCatalog
+    from multi_agent_file_analysis.index import PageIndexLoader
+
+    knowledge_root = args.knowledge_base.resolve()
+    try:
+        catalog = CorpusCatalog.discover(knowledge_root)
+        available = catalog.available(knowledge_root)
+    except Exception as exc:
+        print(f"知识库发现失败：{exc}", file=sys.stderr)
+        return 2
+
+    if not available:
+        print(
+            "没有发现可用的知识库目录；请加入 Markdown 文件、"
+            "CHM 导入结果或 .mafa-corpus.yaml 标记。",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        selected = _select_corpus(available)
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return 130
+    if selected is None:
+        return 0
+    corpus, corpus_root = selected
+
+    print(f"\n正在挂载知识库：{corpus.name}……")
+    with tempfile.TemporaryDirectory(prefix="mafa-corpus-index-") as temporary:
+        index_path = Path(temporary) / "page_index.yaml"
+        try:
+            index = PageIndexLoader.scan_directory(corpus_root, index_path)
+            if not index.documents:
+                raise ValueError("selected corpus contains no Markdown documents")
+            config = AppConfig(
+                page_index_path=index_path,
+                knowledge_base_root=corpus_root,
+                run_mode=(
+                    RunMode.DRY_RUN if args.dry_run else RunMode.INTERACTIVE
+                ),
+                env_file_path=args.env_file.resolve(),
+                audit_log_path=(
+                    args.audit_log.resolve() if args.audit_log else None
+                ),
+                max_file_chars=args.max_chars,
+            )
+            services = ApplicationFactory().build(config)
+        except Exception as exc:
+            print(f"知识库初始化失败：{exc}", file=sys.stderr)
+            return 2
+
+        print(f"已选择：{corpus.name}（{len(index.documents)} 篇文档）")
+        print("当前会话中，Agent 只能看到这个知识库。")
+        return _interactive_loop(
+            services.qa_service,
+            corpus_name=corpus.name,
+        )
+
+
+def _select_corpus(options):
+    print("可用知识库：")
+    for number, (corpus, _) in enumerate(options, start=1):
+        description = f" — {corpus.description}" if corpus.description else ""
+        print(f"  {number}. {corpus.name} [{corpus.corpus_id}]{description}")
+    while True:
+        choice = input("请选择知识库编号（输入 /quit 退出）：").strip()
+        if choice.casefold() in {"/quit", "/exit", "/q"}:
+            return None
+        if choice.isdigit():
+            index = int(choice) - 1
+            if 0 <= index < len(options):
+                return options[index]
+        folded = choice.casefold()
+        for option in options:
+            corpus, _ = option
+            if folded in {corpus.corpus_id.casefold(), corpus.name.casefold()}:
+                return option
+        print("选择无效，请输入列表中的编号或知识库 ID。")
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     if not args.interactive and not (args.query and args.query.strip()):
         print("Provide a question or use --interactive.", file=sys.stderr)
@@ -134,6 +377,7 @@ def _cmd_ask(args: argparse.Namespace) -> int:
         page_index_path=args.page_index.resolve(),
         knowledge_base_root=args.knowledge_base.resolve(),
         run_mode=RunMode.DRY_RUN if args.dry_run else RunMode.INTERACTIVE,
+        env_file_path=args.env_file.resolve(),
         audit_log_path=args.audit_log.resolve() if args.audit_log else None,
         max_file_chars=args.max_chars,
     )
@@ -151,6 +395,8 @@ def _cmd_ask(args: argparse.Namespace) -> int:
 def _single_query(qa_service, query: str) -> int:
     response = qa_service.ask(QARequest(query=query))
     while response.needs_human_input:
+        if response.answer:
+            print(f"\n{response.answer}")
         request = response.state.human_request
         if request is None:
             break
@@ -167,12 +413,13 @@ def _single_query(qa_service, query: str) -> int:
     return _print_response(response)
 
 
-def _interactive_loop(qa_service) -> int:
-    print("Interactive mode. Type /quit to exit.")
+def _interactive_loop(qa_service, *, corpus_name: str | None = None) -> int:
+    label = corpus_name or "knowledge-base"
+    print("已进入连续问答；每次回答后可继续提问，输入 /quit 退出。")
     state = None
     while True:
         try:
-            line = input(">>> ").strip()
+            line = input(f"[{label}] >>> ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
@@ -181,13 +428,19 @@ def _interactive_loop(qa_service) -> int:
         if line.casefold() in {"/quit", "/exit", "/q"}:
             return 0
 
-        if state is not None:
-            response = qa_service.resume(state, line)
-        else:
-            response = qa_service.ask(QARequest(query=line))
+        try:
+            if state is not None:
+                response = qa_service.resume(state, line)
+            else:
+                response = qa_service.ask(QARequest(query=line))
+        except Exception as exc:
+            print(f"问题处理失败：{exc}", file=sys.stderr)
+            continue
 
         if response.needs_human_input:
             state = response.state
+            if response.answer:
+                print(f"\n{response.answer}")
             request = state.human_request
             if request:
                 _print_human_request(request)
@@ -212,14 +465,60 @@ def _print_human_request(request) -> None:
 
 def _print_response(response) -> int:
     state = response.state
-    if response.answer:
-        print(f"\n{response.answer}")
+    answer = response.answer or state.final_answer or state.partial_answer
+    if answer:
+        print(f"\n{answer}")
     if state.errors:
         print("\n运行说明：")
         for error in state.errors:
             print(f"- {error}")
     if state.status == WorkflowStatus.COMPLETED:
         return 0
+    if state.critic_report is not None:
+        report = state.critic_report
+        print("\n最后一次 Critic 审查：")
+        print(f"- 决策：{report.decision}")
+        for note in report.notes:
+            print(f"- 说明：{note}")
+        for item in report.missing_evidence:
+            print(f"- 缺少证据：{item}")
+        for item in report.unsupported_claims:
+            print(f"- 无依据主张：{item}")
+    if state.retrieval_plan is not None:
+        plan = state.retrieval_plan
+        print("\n最后一次 Explorer 检索计划：")
+        for index, obligation in enumerate(plan.evidence_obligations, start=1):
+            marker = (
+                "未覆盖"
+                if obligation in state.uncovered_evidence_obligations
+                else "已绑定证据"
+            )
+            print(f"- E{index} [{marker}]：{obligation}")
+        if plan.exact_literals:
+            print(f"- 精确检索词：{'; '.join(plan.exact_literals)}")
+        if plan.search_queries:
+            print(f"- 发现检索词：{'; '.join(plan.search_queries)}")
+    if state.exploration_log:
+        print("\n最近的检索轨迹：")
+        recent_steps = state.exploration_log[-20:]
+        if len(state.exploration_log) > len(recent_steps):
+            print(f"- ……省略较早的 {len(state.exploration_log) - len(recent_steps)} 步")
+        for step in recent_steps:
+            query = f" query={step.query!r}" if step.query else ""
+            summary = f" -> {step.result_summary}" if step.result_summary else ""
+            print(f"- {step.tool_name} {step.path}{query}{summary}")
+    if state.evidence:
+        print("\n已记录证据：")
+        for item in state.evidence[-12:]:
+            print(f"- {item.citation_key}：{item.summary}")
+    print(
+        "\n执行次数："
+        f"Explorer {state.exploration_attempts} / "
+        f"Reasoner {state.reasoning_attempts} / "
+        f"Critic {state.review_attempts}"
+    )
+    if state.run_id:
+        print(f"Run ID: {state.run_id}")
     print(f"\nWorkflow status: {state.status}")
     return 1
 

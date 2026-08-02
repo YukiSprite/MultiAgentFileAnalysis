@@ -1,6 +1,7 @@
 """Graph workflow implementation — state machine and nodes."""
 
 from .nodes import CriticNode, ExplorerNode, HITLNode, NodeResult, ReasonerNode, WorkflowNode
+from .partial import render_partial_answer
 from .plan import WorkflowEdge, WorkflowPlan
 from .state import (
     CriticReport,
@@ -9,6 +10,7 @@ from .state import (
     EvidenceItem,
     ExplorationStep,
     HumanRequest,
+    RetrievalPlan,
     RuntimeContextItem,
 )
 from .workflow import DiagnosisWorkflow
@@ -26,7 +28,9 @@ __all__ = [
     "HumanRequest",
     "NodeResult",
     "ReasonerNode",
+    "RetrievalPlan",
     "RuntimeContextItem",
+    "render_partial_answer",
     "WorkflowEdge",
     "WorkflowNode",
     "WorkflowPlan",

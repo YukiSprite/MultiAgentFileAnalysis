@@ -6,6 +6,7 @@ from multi_agent_file_analysis.agents import CriticAgent, ExplorerAgent, Reasone
 from multi_agent_file_analysis.audit import JsonlAuditRecorder, MemoryAuditRecorder
 from multi_agent_file_analysis.config import AppConfig
 from multi_agent_file_analysis.core import RunMode
+from multi_agent_file_analysis.environment import load_project_environment
 from multi_agent_file_analysis.graph import DiagnosisWorkflow
 from multi_agent_file_analysis.hitl import HITLSession, SafeCommandBroker
 from multi_agent_file_analysis.index import PageIndexLoader, PageIndexRepository
@@ -35,6 +36,7 @@ class ApplicationFactory:
         config: AppConfig,
         llm_client: LLMClient | None = None,
     ) -> ApplicationServices:
+        load_project_environment(config.env_file_path)
         config.validate()
         # 1. Load page index
         loader = PageIndexLoader()

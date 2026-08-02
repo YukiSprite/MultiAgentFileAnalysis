@@ -114,6 +114,77 @@ class VirtualFileSystemTests(unittest.TestCase):
         self.assertEqual(1, len(result.hits))
         self.assertEqual("/openssh/forwarding.md", result.hits[0].path)
 
+    def test_search_caps_ranked_candidates_without_losing_best_match(self) -> None:
+        bulk = self.root / "bulk"
+        bulk.mkdir()
+        (bulk / "one.md").write_text("shared topic one", encoding="utf-8")
+        (bulk / "target.md").write_text(
+            "shared topic uniquetarget",
+            encoding="utf-8",
+        )
+        (bulk / "three.md").write_text("shared topic three", encoding="utf-8")
+        generated = self.root.parent / "bulk-index.yaml"
+        index = PageIndexLoader.scan_directory(self.root, generated)
+        vfs = VirtualFileSystem(
+            PageIndexRepository(index, self.root),
+            AppConfig(
+                generated,
+                self.root,
+                max_search_candidates=2,
+            ),
+        )
+
+        result = vfs.v_search("shared uniquetarget")
+
+        self.assertEqual("/bulk/target.md", result.hits[0].path)
+        self.assertEqual(2, result.files_searched)
+        self.assertTrue(result.truncated)
+
+    def test_search_and_grep_reach_late_content_in_large_document(self) -> None:
+        large = self.root / "large.md"
+        large.write_text(
+            "# Large spell reference\n\n"
+            + "0123456789\n" * 24_000
+            + "\n**油腻术 (Grease)**\n\n完整法术规则。\n",
+            encoding="utf-8",
+        )
+        generated = self.root.parent / "large-index.yaml"
+        index = PageIndexLoader.scan_directory(self.root, generated)
+        vfs = VirtualFileSystem(
+            PageIndexRepository(index, self.root),
+            AppConfig(generated, self.root),
+        )
+
+        grep_result = vfs.v_grep("/", "油腻术")
+        search_result = vfs.v_search("油腻术")
+
+        self.assertEqual(1, len(grep_result.hits))
+        self.assertEqual("/large.md", grep_result.hits[0].path)
+        self.assertEqual("/large.md", search_result.hits[0].path)
+        self.assertIn("完整法术规则", search_result.hits[0].excerpt)
+
+    def test_search_excerpt_prefers_specific_phrase_over_early_generic_word(
+        self,
+    ) -> None:
+        reference = self.root / "spell-reference.md"
+        reference.write_text(
+            "# 法术参考\n\n法术区域是一个规则章节。\n\n"
+            + "普通说明。\n" * 20
+            + "法术区域中的方格决定一个生物是否受到影响。\n",
+            encoding="utf-8",
+        )
+        generated = self.root.parent / "specific-index.yaml"
+        index = PageIndexLoader.scan_directory(self.root, generated)
+        vfs = VirtualFileSystem(
+            PageIndexRepository(index, self.root),
+            AppConfig(generated, self.root),
+        )
+
+        result = vfs.v_search("法术区域 方格 生物")
+
+        hit = next(item for item in result.hits if item.path == "/spell-reference.md")
+        self.assertIn("法术区域中的方格", hit.excerpt)
+
     def test_evidence_quote_is_bound_to_source(self) -> None:
         quote = "AllowTcpForwarding accepts yes, all, no, local, or remote."
         verified = self.vfs.verify_quote("/openssh/forwarding.md", quote)
