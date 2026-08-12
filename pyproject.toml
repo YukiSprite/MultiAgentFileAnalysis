@@ -12,13 +12,16 @@ authors = [
 dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
+    "mcp>=2.0,<3",
     "pyyaml>=6.0",
     "openai>=1.0",
     "python-dotenv>=1.0",
+    "typing-extensions>=4.13",
 ]
 
 [project.scripts]
 mafa = "multi_agent_file_analysis.cli:main"
+mafa-vfs-mcp = "multi_agent_file_analysis.mcp.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

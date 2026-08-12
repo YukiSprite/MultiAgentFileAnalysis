@@ -216,7 +216,7 @@ class VirtualFileSystem:
         if end_line is not None and end_line < start_line:
             raise VirtualFileSystemError("end_line must not precede start_line")
 
-        source_path, content = self._read_file(path)
+        _, content = self._read_file(path)
         lines = content.splitlines()
         total_lines = len(lines)
         requested_end = end_line or (start_line + self._config.max_read_lines - 1)
@@ -239,7 +239,9 @@ class VirtualFileSystem:
             content=rendered,
             truncated=truncated,
             total_chars=len(content),
-            source_path=str(source_path),
+            # MCP and agent callers may receive this value.  Keep it inside the
+            # virtual namespace instead of leaking the host filesystem path.
+            source_path=path,
             start_line=start_line,
             end_line=max(start_line, actual_end),
             total_lines=total_lines,
@@ -543,9 +545,14 @@ class VirtualFileSystem:
         size_bytes = None
         if node.kind == NodeKind.FILE:
             source_path = self._repo.resolve_source_path(path)
-            if not source_path.exists() or not source_path.is_file():
-                raise VirtualFileSystemError(f"Source file not found for {path}")
-            size_bytes = source_path.stat().st_size
+            try:
+                if not source_path.exists() or not source_path.is_file():
+                    raise VirtualFileSystemError(f"Source file not found for {path}")
+                size_bytes = source_path.stat().st_size
+            except OSError as exc:
+                raise VirtualFileSystemError(
+                    f"Unable to stat virtual file: {path}"
+                ) from exc
         return StatResult(
             path=node.path,
             kind=str(node.kind),
@@ -593,21 +600,34 @@ class VirtualFileSystem:
             raise VirtualFileSystemError(f"Not a virtual file: {virtual_path}")
         source_path = self._repo.resolve_source_path(virtual_path)
         if not source_path.exists():
-            raise VirtualFileSystemError(f"Source file not found: {source_path}")
-        if not source_path.is_file():
-            raise VirtualFileSystemError(f"Source is not a file: {source_path}")
-        if source_path.stat().st_size > self._config.max_source_file_bytes:
             raise VirtualFileSystemError(
-                f"Source exceeds {self._config.max_source_file_bytes} bytes: "
-                f"{virtual_path}"
+                f"Source file not found for virtual path: {virtual_path}"
+            )
+        if not source_path.is_file():
+            raise VirtualFileSystemError(
+                f"Source is not a file for virtual path: {virtual_path}"
             )
         try:
+            if source_path.stat().st_size > self._config.max_source_file_bytes:
+                raise VirtualFileSystemError(
+                    f"Source exceeds {self._config.max_source_file_bytes} bytes: "
+                    f"{virtual_path}"
+                )
             return source_path, source_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            return source_path, source_path.read_text(
-                encoding="utf-8",
-                errors="replace",
-            )
+            try:
+                return source_path, source_path.read_text(
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except OSError as exc:
+                raise VirtualFileSystemError(
+                    f"Unable to read virtual file: {virtual_path}"
+                ) from exc
+        except OSError as exc:
+            raise VirtualFileSystemError(
+                f"Unable to read virtual file: {virtual_path}"
+            ) from exc
 
     def _catalog_candidates(
         self,

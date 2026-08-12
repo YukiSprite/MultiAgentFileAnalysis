@@ -10,6 +10,7 @@
 - 启动时知识库菜单、单语料 VFS 挂载和连续问答会话；
 - 模型原生 function calling，以及不支持时的 JSON 文本回退；
 - `pwd/cd/ls/find/stat/cat/head/tail/grep/search` Unix 风格只读工具；
+- 标准 MCP stdio 服务，完整暴露只读 VFS 原语及证据引句核验；
 - 元数据、别名和正文联合排序的词法 `search`；
 - Explorer、Reasoner、Critic 三阶段工作流；
 - 原文引句、行号、版本、章节和内容哈希组成的证据包；
@@ -176,6 +177,52 @@ VFS 预执行这些模型选择的 `grep/search`，把真实结果交回 Explore
 `record_evidence` 引文还必须声明它直接支持哪些证据义务；只记录若干无关标题或
 索引行不能通过结束门禁。失败输出会显示最后一次计划及仍未覆盖的义务，便于判断是
 未找到原文、未读取正文，还是模型没有正确绑定证据。
+
+### 把 VFS 作为 MCP Server 使用
+
+安装后可把某一份 Page Index 和知识库根目录挂载为本地 stdio MCP Server：
+
+```bash
+mafa-vfs-mcp \
+  --page-index /absolute/path/to/configs/page_index.example.yaml \
+  --knowledge-base /absolute/path/to/knowledge_base
+```
+
+等价的统一 CLI 写法是：
+
+```bash
+mafa mcp \
+  --page-index /absolute/path/to/configs/page_index.example.yaml \
+  --knowledge-base /absolute/path/to/knowledge_base
+```
+
+该进程的 stdout 专用于 MCP 协议帧，通常应由 MCP Host 拉起，而不是由人直接交互。
+例如，支持 `mcpServers` JSON 配置的 Host 可以使用：
+
+```json
+{
+  "mcpServers": {
+    "mafa-vfs": {
+      "command": "mafa-vfs-mcp",
+      "args": [
+        "--page-index",
+        "/absolute/path/to/configs/page_index.example.yaml",
+        "--knowledge-base",
+        "/absolute/path/to/knowledge_base"
+      ]
+    }
+  }
+}
+```
+
+Server 暴露 9 个结构化 Tool：`v_ls`、`v_cat`、`v_read_range`、`v_grep`、
+`v_search`、`v_find`、`v_stat`、`verify_quote` 和 `get_metadata`。它们都声明为
+只读、非破坏、幂等且不访问开放世界；返回值受 `AppConfig` 预算限制。MCP 结果和
+错误只包含虚拟路径，不会返回知识库在宿主机上的真实绝对路径。
+
+`record_evidence` 没有放进这个 MCP Server：它不是文件读取能力，而是一次诊断 run
+中的状态写入，需要检索计划、证据义务和 Orchestrator 上下文。外部 Agent 可先调用
+`verify_quote` 获得可核验坐标，再由自己的工作流决定如何保存证据。
 
 等待现场信息、最终未通过 Critic 或工作流失败时，CLI 和 QA API 都不会返回空答案。
 系统会确定性渲染一份醒目标记为“尚未/未通过最终审查”的阶段性回答，包含最后的

@@ -76,6 +76,12 @@ class CLITests(unittest.TestCase):
     def test_empty_entrypoint_opens_corpus_chat(self) -> None:
         self.assertEqual(["chat"], _normalize_argv([]))
 
+    def test_mcp_is_an_explicit_top_level_command(self) -> None:
+        self.assertEqual(
+            ["mcp", "--max-chars", "1000"],
+            _normalize_argv(["mcp", "--max-chars", "1000"]),
+        )
+
     def test_chat_locks_selected_corpus_and_accepts_multiple_questions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

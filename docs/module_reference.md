@@ -42,6 +42,17 @@
 - `v_cat` / `v_read_range`：有界范围读取；
 - `verify_quote`：把引句绑定到路径、行号、章节和哈希。
 
+## `mcp/`
+
+- `create_vfs_mcp_server`：把一个已挂载的 `VirtualFileSystem` 注册为 9 个标准 MCP
+  structured tools；
+- `load_virtual_file_system`：只装配 Page Index、Repository 和 VFS，不加载模型或
+  完整 Agent 工作流；
+- `mafa-vfs-mcp` / `mafa mcp`：通过本地 stdio transport 供 MCP Host 拉起；
+- 所有 Tool 都带只读、非破坏、幂等、封闭世界 annotations；
+- MCP 输出只使用虚拟路径；Host 不能通过正常或错误响应得到知识库真实绝对路径；
+- `record_evidence` 属于 Orchestrator 的 run 状态写入，因此不在只读 VFS MCP 中。
+
 ## `llm/`
 
 - `LLMToolDefinition` / `LLMToolCall`：供应商中立的原生工具定义与调用对象；
@@ -83,5 +94,5 @@
 ## `qa/` / `cli.py`
 
 `QAService` 提供 `ask`、`resume` 和按 run ID 恢复。CLI 支持 `index`、`ingest-chm`、
-`chat`、`ask`、交互模式、dry-run 和旧式省略 `ask` 的快捷写法。不带参数运行
+`chat`、`ask`、`mcp`、交互模式、dry-run 和旧式省略 `ask` 的快捷写法。不带参数运行
 `mafa` 等价于 `mafa chat`；`chat` 在每次回答后继续接收新问题。

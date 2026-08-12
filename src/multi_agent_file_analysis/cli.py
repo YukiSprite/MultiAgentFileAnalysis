@@ -31,6 +31,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_chat(args)
     if args.command == "ask":
         return _cmd_ask(args)
+    if args.command == "mcp":
+        return _cmd_mcp(args)
     parser.print_help()
     return 0
 
@@ -40,7 +42,15 @@ def _normalize_argv(args: list[str]) -> list[str]:
     if not args:
         return ["chat"]
     first = args[0]
-    if first in {"ask", "chat", "index", "ingest-chm", "-h", "--help"}:
+    if first in {
+        "ask",
+        "chat",
+        "index",
+        "ingest-chm",
+        "mcp",
+        "-h",
+        "--help",
+    }:
         return args
     return ["ask", *args]
 
@@ -173,6 +183,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ask_parser = sub.add_parser("ask", help="Ask the indexed knowledge base")
     ask_parser.add_argument("query", nargs="?", help="Question to diagnose")
     _add_ask_flags(ask_parser)
+
+    mcp_parser = sub.add_parser(
+        "mcp",
+        help="Serve one indexed virtual filesystem over MCP stdio",
+    )
+    from multi_agent_file_analysis.mcp.cli import add_server_arguments
+
+    add_server_arguments(mcp_parser)
     return parser
 
 
@@ -390,6 +408,12 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     if args.interactive:
         return _interactive_loop(services.qa_service)
     return _single_query(services.qa_service, args.query)
+
+
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from multi_agent_file_analysis.mcp.cli import run_server_from_args
+
+    return run_server_from_args(args)
 
 
 def _single_query(qa_service, query: str) -> int:

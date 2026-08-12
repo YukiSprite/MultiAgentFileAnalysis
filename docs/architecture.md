@@ -19,6 +19,8 @@ flowchart LR
     W --> E[Explorer]
     E --> P[Unix Tool Facade]
     P --> V[VFS]
+    MH[External MCP Host] --> MS[VFS MCP stdio Server]
+    MS --> V
     V --> I[Page Index]
     I --> K[(Normalized Markdown KB)]
     E --> S[(Diagnosis State)]
@@ -79,6 +81,18 @@ Unix 门面内部映射到 VFS 原语：
 - `v_find` / `v_stat`：受预算约束的节点查找与元数据读取。
 
 VFS 不直接向 Agent 暴露真实路径。Page Index 的 `source` 经 `Path.resolve()` 后必须仍位于知识库根目录；符号链接和 `..` 不能绕过边界。
+
+同一组 VFS 原语还由一个独立的 MCP stdio 适配层对外提供。MCP Server 在启动时只
+注入一个已校验的 `VirtualFileSystem`，不装配 LLM、Agent、HITL 或完整 QA 应用；
+因此 MCP Host 不能借此越过当前 Page Index，也不能调用 Shell。公开 Tool 为
+`v_ls`、`v_cat`、`v_read_range`、`v_grep`、`v_search`、`v_find`、`v_stat`、
+`verify_quote` 和 `get_metadata`。每个 Tool 都带只读、非破坏、幂等和封闭世界
+annotations，并返回结构化结果。stdio 进程由 `mafa-vfs-mcp` 或 `mafa mcp` 启动。
+
+内部 Explorer 目前继续使用带 `pwd/cd/head/tail` 会话语义的 Unix 门面；外部 MCP
+接口使用无会话当前目录的 VFS 绝对虚拟路径。两者共用同一个 VFS 策略与预算，不复制
+文件读取逻辑。`record_evidence` 仍由 Orchestrator 管理，因为它会改变单次诊断状态，
+不是一个无状态的只读文件系统操作。
 
 当前 `v_search` 是轻量词法实现，不是完整 BM25。它首次使用时为已登记正文和元数据
 建立内存倒排目录，以 ASCII token/trigram 和中文 bigram 排序出有界候选集，再执行
