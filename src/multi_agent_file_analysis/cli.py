@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from multi_agent_file_analysis.app import ApplicationFactory, mount_corpus
@@ -26,6 +27,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_index(args)
     if args.command == "ingest-chm":
         return _cmd_ingest_chm(args)
+    if args.command == "web":
+        return _cmd_web(args)
     if args.command == "chat":
         return _cmd_chat(args)
     if args.command == "ask":
@@ -37,9 +40,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _normalize_argv(args: list[str]) -> list[str]:
     """Keep the documented `mafa [flags] question` shorthand working."""
     if not args:
-        return ["chat"]
+        return ["web"]
     first = args[0]
-    if first in {"ask", "chat", "index", "ingest-chm", "-h", "--help"}:
+    if first in {"ask", "chat", "web", "index", "ingest-chm", "-h", "--help"}:
         return args
     return ["ask", *args]
 
@@ -169,6 +172,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum characters returned by one file read",
     )
 
+    web_parser = sub.add_parser(
+        "web",
+        help="Open the browser console (default when run without arguments)",
+    )
+    web_parser.add_argument(
+        "--knowledge-base",
+        type=Path,
+        default=Path("knowledge_base"),
+        help="Root scanned dynamically for selectable corpus directories",
+    )
+    web_parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help="Load model configuration without overriding shell variables",
+    )
+    web_parser.add_argument("--host", default="127.0.0.1")
+    web_parser.add_argument("--port", type=int, default=8765)
+    web_parser.add_argument("--max-sessions", type=int, default=8)
+    web_parser.add_argument("--idle-minutes", type=float, default=30.0)
+    web_parser.add_argument("--max-events", type=int, default=200)
+
     ask_parser = sub.add_parser("ask", help="Ask the indexed knowledge base")
     ask_parser.add_argument("query", nargs="?", help="Question to diagnose")
     _add_ask_flags(ask_parser)
@@ -283,6 +308,49 @@ def _cmd_ingest_chm(args: argparse.Namespace) -> int:
         if len(result.warnings) > 20:
             print(f"  - ... {len(result.warnings) - 20} more in manifest.json")
     return 0
+
+
+WEB_DEPENDENCIES = ("fastapi", "uvicorn")
+
+
+def _missing_web_dependency(
+    probe: Callable[[str], object] | None = None,
+) -> str | None:
+    """Return the first missing import needed by the browser console."""
+    find = probe or importlib.util.find_spec
+    for name in WEB_DEPENDENCIES:
+        try:
+            if find(name) is None:
+                return name
+        except (ImportError, ValueError):
+            return name
+    return None
+
+
+def _cmd_web(args: argparse.Namespace) -> int:
+    missing = _missing_web_dependency()
+    if missing is not None:
+        print(f"控制台需要 Web 依赖，当前环境缺少：{missing}", file=sys.stderr)
+        print(
+            "请先运行：python -m pip install -r requirements.txt",
+            file=sys.stderr,
+        )
+        return 1
+
+    from multi_agent_file_analysis.web import WebSettings, serve
+
+    settings = WebSettings(
+        idle_ttl_seconds=max(1.0, args.idle_minutes * 60.0),
+        max_sessions=max(1, args.max_sessions),
+        max_events_per_run=max(1, args.max_events),
+    )
+    return serve(
+        knowledge_root=args.knowledge_base,
+        env_file_path=args.env_file,
+        host=args.host,
+        port=args.port,
+        settings=settings,
+    )
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:

@@ -21,7 +21,6 @@ dependencies = [
 
 [project.scripts]
 mafa = "multi_agent_file_analysis.cli:main"
-mafa-web = "multi_agent_file_analysis.web.server:main"
 
 [build-system]
 requires = ["setuptools>=68"]

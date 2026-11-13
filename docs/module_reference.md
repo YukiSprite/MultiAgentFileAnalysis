@@ -82,9 +82,10 @@
 
 ## `qa/` / `cli.py`
 
-`QAService` 提供 `ask`、`resume` 和按 run ID 恢复。CLI 支持 `index`、`ingest-chm`、
-`chat`、`ask`、交互模式、dry-run 和旧式省略 `ask` 的快捷写法。不带参数运行
-`mafa` 等价于 `mafa chat`；`chat` 在每次回答后继续接收新问题。
+`QAService` 提供 `ask`、`resume` 和按 run ID 恢复。CLI 支持 `web`、`index`、
+`ingest-chm`、`chat`、`ask`、dry-run 和旧式省略 `ask` 的快捷写法。不带参数运行
+`mafa` 等价于 `mafa web`：启动控制台并打印可点击链接；`mafa chat` 进入终端连续
+问答，每次回答后继续接收新问题。
 
 ## `web/`
 

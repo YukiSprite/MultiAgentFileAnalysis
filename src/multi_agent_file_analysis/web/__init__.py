@@ -4,7 +4,7 @@ from .errors import ConsoleError
 from .events import EventBus, EventBusRecorder, FanoutAuditRecorder
 from .jobs import JobRunner, RunJob, RunState
 from .serializers import run_payload, session_payload
-from .server import create_app, main
+from .server import create_app, main, serve
 from .sessions import SessionRegistry, WebSession, WebSettings
 
 __all__ = [
@@ -21,5 +21,6 @@ __all__ = [
     "create_app",
     "main",
     "run_payload",
+    "serve",
     "session_payload",
 ]

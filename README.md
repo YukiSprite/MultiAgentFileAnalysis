@@ -24,12 +24,33 @@
 
 ## 安装
 
+需要 Python 3.11 以上。三个平台一致，不要求虚拟环境、PATH 配置或安装本包：
+
+```bash
+python -m pip install -r requirements.txt
+python mafa.py
+```
+
+macOS 和 Ubuntu 通常写成 `python3`。`mafa.py` 会把 `src/` 加入模块搜索路径，因此
+不执行 `pip install -e .` 也能运行；不带参数时启动控制台并打印地址。
+
+如果希望全局使用 `mafa` 命令（可选）：
+
+```bash
+python -m pip install -e .
+mafa
+```
+
+Conda 用户也可以：
+
 ```bash
 conda create -n mafa python=3.12 -y
 conda activate mafa
 pip install -r requirements.txt
-pip install -e .
+python mafa.py
 ```
+
+下文命令中的 `mafa` 都可以等价写成 `python mafa.py`。
 
 ## 快速验证
 
@@ -45,15 +66,30 @@ mafa --dry-run "GW-004 错误是什么原因？"
 mafa ask --dry-run "RATE_LIMIT_RPS 的默认值是什么？"
 ```
 
-## 从主入口开始连续问答
+## 主入口
 
-直接运行 `mafa`，不带参数：
+直接运行 `mafa`，不带参数，会启动浏览器控制台并在终端打印可点击链接：
 
 ```bash
 mafa
 ```
 
-程序每次启动都会扫描 `knowledge_base/` 的实际内容并即时生成菜单：
+```text
+MAFA 控制台：http://127.0.0.1:8765/
+会话只存在于当前进程；按 Ctrl+C 停止。
+```
+
+浏览器打开该地址，选择一个语料即可开始。端口和会话上限可以显式指定：
+
+```bash
+mafa web --port 8765 --max-sessions 8 --idle-minutes 30
+```
+
+终端问答仍然保留，用 `mafa chat` 进入：
+
+```bash
+mafa chat
+```
 
 ```text
 可用知识库：
@@ -268,18 +304,17 @@ mafa ask \
 
 ## H5 控制台
 
-命令行之外，可以启动一个浏览器界面。前端是无构建步骤的原生 HTML/JS，后端复用同一套
-服务与工作流：
+`mafa` 不带参数时就是控制台。也可以显式调用：
 
 ```bash
-PYTHONPATH=src python -m multi_agent_file_analysis.web \
+mafa web \
   --knowledge-base knowledge_base \
   --env-file .env \
   --host 127.0.0.1 \
   --port 8765
 ```
 
-安装后可简写为 `mafa-web`。打开 `http://127.0.0.1:8765/`，选择一个语料即可开始。
+安装后直接运行 `mafa` 即可。打开 `http://127.0.0.1:8765/`，选择一个语料开始。
 
 控制台会做三件命令行做不到的事：把阶段与工具调用实时推给页面；把回答拆成
 "最终 / 阶段性"两种视觉状态；把已核验证据、检索义务覆盖和 Critic 决策放进可展开的

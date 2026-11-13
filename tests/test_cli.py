@@ -73,8 +73,60 @@ class CLITests(unittest.TestCase):
         self.assertEqual(0, status)
         self.assertIn("RATE_LIMIT_RPS", output.getvalue())
 
-    def test_empty_entrypoint_opens_corpus_chat(self) -> None:
-        self.assertEqual(["chat"], _normalize_argv([]))
+    def test_web_command_reports_missing_dependencies(self) -> None:
+        from multi_agent_file_analysis.cli import _missing_web_dependency
+
+        self.assertIsNone(_missing_web_dependency(lambda name: object()))
+        self.assertEqual(
+            "fastapi",
+            _missing_web_dependency(
+                lambda name: None if name == "fastapi" else object()
+            ),
+        )
+        errors = io.StringIO()
+        with (
+            patch(
+                "multi_agent_file_analysis.cli._missing_web_dependency",
+                return_value="fastapi",
+            ),
+            redirect_stderr(errors),
+        ):
+            status = main(["web"])
+        self.assertEqual(1, status)
+        self.assertIn("fastapi", errors.getvalue())
+        self.assertIn("pip install -r requirements.txt", errors.getvalue())
+
+    def test_empty_entrypoint_opens_web_console(self) -> None:
+        self.assertEqual(["web"], _normalize_argv([]))
+        self.assertEqual(["web", "--port", "9000"], _normalize_argv(["web", "--port", "9000"]))
+
+    def test_web_command_forwards_flags_to_server(self) -> None:
+        with patch("multi_agent_file_analysis.web.serve") as serve:
+            serve.return_value = 0
+            status = main(
+                [
+                    "web",
+                    "--port",
+                    "9100",
+                    "--host",
+                    "0.0.0.0",
+                    "--max-sessions",
+                    "3",
+                    "--idle-minutes",
+                    "5",
+                    "--knowledge-base",
+                    "knowledge_base",
+                    "--env-file",
+                    ".env.example",
+                ]
+            )
+        self.assertEqual(0, status)
+        kwargs = serve.call_args.kwargs
+        self.assertEqual(9100, kwargs["port"])
+        self.assertEqual("0.0.0.0", kwargs["host"])
+        self.assertEqual(3, kwargs["settings"].max_sessions)
+        self.assertEqual(300.0, kwargs["settings"].idle_ttl_seconds)
+        self.assertEqual(Path("knowledge_base"), kwargs["knowledge_root"])
 
     def test_chat_locks_selected_corpus_and_accepts_multiple_questions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

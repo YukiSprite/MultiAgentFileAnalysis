@@ -229,6 +229,28 @@ def _format_sse(event: RunEvent) -> str:
     return f"id: {event.seq}\nevent: {event.type}\ndata: {payload}\n\n"
 
 
+def serve(
+    *,
+    knowledge_root: Path,
+    env_file_path: Path | None = None,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    settings: WebSettings | None = None,
+) -> int:
+    """Start the console and print a clickable local URL."""
+    import uvicorn
+
+    app = create_app(
+        knowledge_root,
+        env_file_path=env_file_path,
+        settings=settings,
+    )
+    print(f"MAFA 控制台：http://{host}:{port}/", flush=True)
+    print("会话只存在于当前进程；按 Ctrl+C 停止。", flush=True)
+    uvicorn.run(app, host=host, port=port, log_level="info")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Serve the MultiAgentFileAnalysis H5 console"
@@ -246,24 +268,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-events", type=int, default=200)
     args = parser.parse_args(argv)
 
-    import uvicorn
-
     settings = WebSettings(
         idle_ttl_seconds=max(1.0, args.idle_minutes * 60.0),
         max_sessions=max(1, args.max_sessions),
         max_events_per_run=max(1, args.max_events),
     )
-    app = create_app(
-        args.knowledge_base,
+    return serve(
+        knowledge_root=args.knowledge_base,
         env_file_path=args.env_file,
+        host=args.host,
+        port=args.port,
         settings=settings,
     )
-    print(
-        "Console sessions live in this process only; run a single worker.",
-        flush=True,
-    )
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-    return 0
 
 
 if __name__ == "__main__":
