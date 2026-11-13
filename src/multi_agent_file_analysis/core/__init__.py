@@ -16,6 +16,7 @@ from .types import (
     ReviewDecision,
     RunMode,
     ToolName,
+    TrustLevel,
     WorkflowStage,
     WorkflowStatus,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "ReviewDecision",
     "RunMode",
     "ToolName",
+    "TrustLevel",
     "VirtualFileSystemError",
     "WorkflowError",
     "WorkflowStage",

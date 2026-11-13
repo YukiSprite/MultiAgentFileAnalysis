@@ -9,6 +9,7 @@ from multi_agent_file_analysis.agents.base import (
     AgentContext,
     AgentResult,
     call_llm,
+    digest_tokens,
 )
 from multi_agent_file_analysis.core import (
     AgentResultStatus,
@@ -44,6 +45,9 @@ Fail closed. Do not approve merely because a parameter name appears in a source.
 Check conditions, exceptions, version, and command safety. Reject or request
 revision when a claim relies on the user's description instead of verified source
 text, or when it silently resolves a conflict against the indexed evidence.
+Runtime observations marked user_asserted describe the user's own environment: a
+draft may rely on them only when it labels them as user-provided and unverified,
+and they never support documented rule claims.
 
 A table-of-contents row, navigation link, bare heading, or name-only mention does
 not support the behavior of the named concept. For questions that combine two or
@@ -60,6 +64,14 @@ title-only, or name-only quote must still be treated as missing evidence.
 Do not suggest that the user should supply documentation that belongs in the
 indexed workspace.
 """
+
+
+def _quote_excerpt(item: Any) -> str:
+    """Render the verified span, never the unverified digest."""
+    quote = " ".join((item.quote or "").split())
+    if len(quote) > 160:
+        quote = quote[:160].rstrip() + "…"
+    return quote or item.summary
 
 
 class CriticAgent:
@@ -163,6 +175,8 @@ class CriticAgent:
                 content=(
                     f"Question: {state.user_query}\n"
                     f"Evidence:\n{self._format_evidence(state)}\n\n"
+                    f"Runtime context (user-asserted, not documentary):\n"
+                    f"{self._format_runtime(state)}\n\n"
                     f"Summary: {draft.summary}\n"
                     f"Root cause: {draft.root_cause or 'none'}\n"
                     f"Actions: {'; '.join(draft.recommended_actions) or 'none'}\n"
@@ -198,6 +212,19 @@ class CriticAgent:
         notes = self._string_list(parsed.get("notes"))
         missing = self._string_list(parsed.get("missing_evidence"))
         unsupported = self._string_list(parsed.get("unsupported_claims"))
+        if decision == ReviewDecision.NEEDS_REVISION and unsupported:
+            attributed = self._digest_attribution(state, unsupported)
+            if attributed:
+                decision = ReviewDecision.NEEDS_MORE_EVIDENCE
+                notes.append(
+                    "Decision normalized to needs_more_evidence: unsupported "
+                    "claims only restate evidence digests beyond their quotes"
+                )
+                for key in attributed:
+                    missing.append(
+                        f"Evidence {key} digest exceeds its quote; widen the "
+                        "quoted span"
+                    )
         if missing and decision in {
             ReviewDecision.APPROVED,
             ReviewDecision.NEEDS_REVISION,
@@ -235,6 +262,42 @@ class CriticAgent:
             unsupported=unsupported,
             next_stage=None,
         )
+
+    @staticmethod
+    def _digest_attribution(
+        state: DiagnosisState,
+        claims: list[str],
+    ) -> list[str] | None:
+        """Attribute every claim to a digest that overreaches its own quote.
+
+        Returns citation keys only when all claims share the same defect. A
+        claim that any quote supports, or that no digest explains, keeps the
+        draft on the revision path.
+        """
+        keys: list[str] = []
+        for claim in claims:
+            claim_tokens = digest_tokens(claim)
+            if not claim_tokens:
+                return None
+            if any(
+                claim_tokens <= digest_tokens(item.quote or "")
+                for item in state.evidence
+            ):
+                return None
+            match = next(
+                (
+                    item
+                    for item in state.evidence
+                    if claim_tokens <= digest_tokens(item.summary)
+                    and not claim_tokens <= digest_tokens(item.quote or "")
+                ),
+                None,
+            )
+            if match is None:
+                return None
+            if match.citation_key not in keys:
+                keys.append(match.citation_key)
+        return keys or None
 
     def _approve(
         self,
@@ -309,7 +372,7 @@ class CriticAgent:
         for item in state.evidence:
             if item.source_path in cited or item.citation_key in cited:
                 evidence_lines.append(
-                    f"- `{item.citation_key}`：{item.summary}"
+                    f"- `{item.citation_key}`：{_quote_excerpt(item)}"
                 )
         sections.extend(
             [
@@ -317,6 +380,18 @@ class CriticAgent:
                 "\n".join(evidence_lines) or "- 未找到可显示的证据",
             ]
         )
+        runtime_lines = [
+            f"- 请求 {item.request_id or 'unknown'}："
+            f"{' '.join(item.content.split())[:200]}"
+            for item in state.runtime_context
+        ]
+        if runtime_lines:
+            sections.extend(
+                [
+                    "## 运行时依据（用户提供，未验证）",
+                    "\n".join(runtime_lines),
+                ]
+            )
         if draft.confidence:
             sections.extend(["## 置信度", draft.confidence])
         return "\n\n".join(sections)
@@ -328,9 +403,21 @@ class CriticAgent:
             f"section={item.section or 'unknown'}\n"
             f"  declared_support="
             f"{'; '.join(item.supports_obligations) or 'unassigned'}\n"
+            f"  digest (model-written, not evidence; verify against quote)="
+            f"{item.summary}\n"
             f"  {item.quote}"
             for item in state.evidence
             if item.verified and item.quote
+        )
+
+    @staticmethod
+    def _format_runtime(state: DiagnosisState) -> str:
+        if not state.runtime_context:
+            return "none"
+        return "\n".join(
+            f"- request={item.request_id or 'unknown'} trust={item.trust} "
+            f"{item.label}: {item.content[:1000]}"
+            for item in state.runtime_context
         )
 
     @staticmethod

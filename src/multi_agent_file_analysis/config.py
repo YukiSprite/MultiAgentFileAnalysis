@@ -31,6 +31,7 @@ class AppConfig:
     max_explorer_turns: int = 12
     max_workflow_iterations: int = 16
     max_review_retries: int = 2
+    max_hitl_resumes: int = 2
     max_human_input_chars: int = 20_000
 
     def validate(self) -> None:
@@ -67,3 +68,5 @@ class AppConfig:
                 raise ConfigError(f"{name} must be greater than zero")
         if self.max_review_retries < 0:
             raise ConfigError("max_review_retries must not be negative")
+        if self.max_hitl_resumes < 0:
+            raise ConfigError("max_hitl_resumes must not be negative")

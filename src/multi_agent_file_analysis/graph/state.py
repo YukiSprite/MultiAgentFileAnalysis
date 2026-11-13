@@ -13,6 +13,7 @@ from multi_agent_file_analysis.core import (
     EvidenceKind,
     ReviewDecision,
     ToolName,
+    TrustLevel,
     WorkflowStage,
     WorkflowStatus,
 )
@@ -148,6 +149,7 @@ class EvidenceItem:
     supports_obligations: list[str] = field(default_factory=list)
     truncated: bool = False
     verified: bool = False
+    digest_verified: bool = True
 
     @property
     def citation_key(self) -> str:
@@ -202,6 +204,7 @@ class RuntimeContextItem:
     source_hint: str | None = None
     request_id: str | None = None
     verified: bool = False
+    trust: TrustLevel = TrustLevel.USER_ASSERTED
 
 
 @dataclass(slots=True)
@@ -237,6 +240,8 @@ class HumanRequest:
     request_id: str = ""
     command_approved: bool = False
     command_warning: str | None = None
+    rejected_command: str | None = None
+    attempt: int = 1
 
 
 @dataclass(slots=True)

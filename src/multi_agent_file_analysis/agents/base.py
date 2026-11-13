@@ -7,6 +7,7 @@ policy beyond suggesting a next_stage in the result.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -16,6 +17,30 @@ if TYPE_CHECKING:
     from multi_agent_file_analysis.audit import AuditRecorder
     from multi_agent_file_analysis.graph.state import DiagnosisState
     from multi_agent_file_analysis.llm import LLMClient, LLMRequest, LLMResponse
+
+
+_DIGEST_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:=/_\-]*")
+_DIGEST_TOKEN_EDGE = ".,;:!?)]}\"'"
+_DIGEST_DELIMITERS = "=.:/-_"
+
+
+def digest_tokens(text: str) -> set[str]:
+    """Extract configuration-shaped tokens from model-written digest text.
+
+    Only values that can be checked mechanically are compared: an ASCII run
+    containing a delimiter or a digit. Prose and Chinese paraphrase are left to
+    the critic, so this predicate is intentionally narrow.
+    """
+    tokens: set[str] = set()
+    for match in _DIGEST_TOKEN.findall(text):
+        token = match.strip(_DIGEST_TOKEN_EDGE)
+        if len(token) < 2:
+            continue
+        if any(char in _DIGEST_DELIMITERS for char in token) or any(
+            char.isdigit() for char in token
+        ):
+            tokens.add(token.casefold())
+    return tokens
 
 
 @dataclass(slots=True)

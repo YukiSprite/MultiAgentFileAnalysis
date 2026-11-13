@@ -552,6 +552,9 @@ def _print_human_request(request) -> None:
         print(f"已通过只读门禁的建议命令：{request.suggested_command}")
     elif request.command_warning:
         print(f"命令未展示：{request.command_warning}")
+        if request.rejected_command:
+            print(f"被拒命令：{request.rejected_command}")
+    print(f"追问次数：第 {request.attempt} 次")
     print(f"期望输入：{request.expected_input}")
     print(f"请求 ID：{request.request_id}")
 
@@ -604,7 +607,10 @@ def _print_response(response) -> int:
     if state.evidence:
         print("\n已记录证据：")
         for item in state.evidence[-12:]:
-            print(f"- {item.citation_key}：{item.summary}")
+            print(
+                f"- {item.citation_key}：{item.summary}"
+                "（模型摘要，未逐字核验）"
+            )
     print(
         "\n执行次数："
         f"Explorer {state.exploration_attempts} / "

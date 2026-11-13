@@ -84,6 +84,10 @@ def _human_request(state: DiagnosisState | None) -> dict[str, Any] | None:
         "suggested_command": (
             request.suggested_command if request.command_approved else None
         ),
+        "command_approved": request.command_approved,
+        "command_warning": request.command_warning,
+        "rejected_command": request.rejected_command,
+        "attempt": request.attempt,
         "request_id": request.request_id,
     }
 

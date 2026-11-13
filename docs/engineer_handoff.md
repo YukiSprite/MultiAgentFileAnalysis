@@ -69,6 +69,8 @@ Token 与延迟数据已可由 run 账本直接产出：`DiagnosisState.metrics`
 ## 修改约定
 
 - 新证据字段必须保持可序列化并补测试；
+- 证据摘要不得超出引句：配置值类 token 必须能在 quote 中找到，最终输出以引句为准；
+- 用户回填只能作为 `user_asserted` 运行时事实，不得升格为文档规则；
 - 新 VFS 工具必须同时定义输入上限、输出上限和审计字段；
 - 任何审批异常都应 fail-closed；
 - 不允许 Finalizer 在 Critic 后新增模型内容；

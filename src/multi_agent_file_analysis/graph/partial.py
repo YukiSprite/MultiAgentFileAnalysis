@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from multi_agent_file_analysis.core import WorkflowStatus
 from multi_agent_file_analysis.graph.state import DiagnosisState, EvidenceItem
 
 
@@ -49,6 +50,18 @@ def render_partial_answer(state: DiagnosisState) -> str:
             ]
         )
 
+    if state.runtime_context:
+        sections.extend(
+            [
+                "## 运行时依据（用户提供，未验证）",
+                "\n".join(
+                    f"- 请求 {item.request_id or 'unknown'}："
+                    f"{' '.join(item.content.split())[:200]}"
+                    for item in state.runtime_context
+                ),
+            ]
+        )
+
     gaps = _remaining_gaps(state)
     if gaps:
         sections.extend(
@@ -58,7 +71,10 @@ def render_partial_answer(state: DiagnosisState) -> str:
             ]
         )
 
-    if state.human_request is not None:
+    if (
+        state.status == WorkflowStatus.WAITING_FOR_HUMAN
+        and state.human_request is not None
+    ):
         reason = f"等待补充现场信息：{state.human_request.prompt}"
     else:
         reason = (

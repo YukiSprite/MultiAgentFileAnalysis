@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from multi_agent_file_analysis.core import TrustLevel
 from multi_agent_file_analysis.core.errors import HITLError
 from multi_agent_file_analysis.graph.state import (
     DiagnosisState,
@@ -77,6 +78,7 @@ class HITLSession:
                 source_hint=response.source_hint,
                 request_id=request_id,
                 verified=False,
+                trust=TrustLevel.USER_ASSERTED,
             )
         )
         state.human_request = None

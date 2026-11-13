@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any
 
@@ -33,8 +34,10 @@ Distinguish documentary rule claims from case assumptions. A condition explicitl
 posed by the question for a hypothetical scenario may be used as an assumed input
 to a conditional answer; label it as an assumption and do not demand a source that
 proves the hypothetical condition occurred. It still cannot establish or override
-the meaning of a documented rule. Runtime claims about a real system remain
-unverified unless supported by runtime observations.
+the meaning of a documented rule. Runtime observations labelled trust=user_asserted
+are facts the user supplied about their own environment: use them as conditional
+premises, restate them, and label them as user-provided and unverified. They never
+establish or override documented rule meaning.
 
 The source does not need to restate the user's exact scenario in one sentence.
 When several verified passages jointly determine the answer, make the shortest
@@ -58,7 +61,10 @@ Use human_request only for a genuinely missing live/runtime fact that cannot be
 obtained from the indexed workspace, such as the current value of a setting or a
 runtime observation. Missing documentary evidence is not a live fact. Never ask
 the user to paste a manual, rulebook passage, source page, parameter definition,
-or other knowledge-base content. If the supplied evidence is documentary but
+or other knowledge-base content. If the runtime observations already answer the
+missing fact, do NOT request it again: draft the best conditional answer using
+that value, labelled as user-provided and unverified. If a different runtime fact
+is still missing, request only that new fact. If the supplied evidence is documentary but
 insufficient, still create the most useful cautious draft available. Its summary
 must state, in order: what the verified passages establish, what conditional
 inference (if any) follows from them, and exactly which step remains undecidable.
@@ -75,6 +81,12 @@ Do not invent source paths, configuration values, or runtime state. Every
 diagnostic claim and action must be supported by cited evidence. Commands are
 optional and will be removed unless they pass a deterministic allowlist.
 """
+
+
+REASONER_REPAIR_PROMPT = """Check whether the runtime facts above already answer
+your previous request. If they do, do not ask for that fact again: return a draft
+that uses the supplied value as a labelled user-provided conditional premise.
+If they do not answer it, keep requesting only the genuinely missing fact."""
 
 
 class ReasonerAgent:
@@ -144,6 +156,32 @@ class ReasonerAgent:
             )
 
         action = parsed.get("action")
+        if (
+            action == "human_request"
+            and state.runtime_context
+            and state.resume_count > 0
+        ):
+            messages = [
+                *messages,
+                LLMMessage(role="assistant", content=response.message.content),
+                LLMMessage(role="user", content=REASONER_REPAIR_PROMPT),
+            ]
+            response = call_llm(
+                state,
+                AgentRole.REASONER,
+                llm,
+                LLMRequest(messages=messages),
+            )
+            parsed = self._parse_action(response.message.content)
+            if parsed is None:
+                state.errors.append("Reasoner repair returned invalid JSON")
+                return AgentResult(
+                    role=self.role,
+                    status=AgentResultStatus.FAILED,
+                    message="Reasoner repair returned invalid structured output",
+                    next_stage=None,
+                )
+            action = parsed.get("action")
         if action == "human_request":
             return self._create_human_request(state, parsed)
         if action == "draft":
@@ -197,6 +235,10 @@ class ReasonerAgent:
                 message="Human-input request lacks prompt or expected input",
                 next_stage=None,
             )
+        if self._repeats_answered_fact(state, prompt, expected):
+            draft_result = self._runtime_conditional_draft(state)
+            if draft_result is not None:
+                return draft_result
 
         command = self._optional_str(parsed.get("suggested_command"))
         assessment = self._command_broker.assess(command)
@@ -212,6 +254,12 @@ class ReasonerAgent:
                 if assessment.approved or command is None
                 else assessment.reason
             ),
+            rejected_command=(
+                None
+                if assessment.approved or command is None
+                else self._command_preview(command)
+            ),
+            attempt=state.resume_count + 1,
         )
         return AgentResult(
             role=self.role,
@@ -219,6 +267,102 @@ class ReasonerAgent:
             message="Verified runtime context is required",
             next_stage=WorkflowStage.REQUEST_HUMAN_INPUT,
         )
+
+    @staticmethod
+    def _repeats_answered_fact(
+        state: DiagnosisState,
+        prompt: str,
+        expected: str,
+    ) -> bool:
+        """Detect a request for a fact the user already supplied."""
+        if not state.runtime_context or state.resume_count == 0:
+            return False
+        target = f"{prompt} {expected}".casefold()
+        ascii_terms = {
+            term
+            for term in re.findall(r"[a-z0-9]{2,}", target)
+            if len(term) >= 3 or term.isdigit()
+        }
+        target_bigrams = {
+            target[index : index + 2] for index in range(len(target) - 1)
+        }
+        for item in state.runtime_context:
+            content = item.content.casefold()
+            content_terms = {
+                term
+                for term in re.findall(r"[a-z0-9]{2,}", content)
+                if len(term) >= 3 or term.isdigit()
+            }
+            if ascii_terms & content_terms:
+                return True
+            label = item.label.casefold()
+            shared = {
+                label[index : index + 2] for index in range(len(label) - 1)
+            } & target_bigrams
+            chinese = [
+                bigram
+                for bigram in shared
+                if any("\u4e00" <= char <= "\u9fff" for char in bigram)
+            ]
+            if len(chinese) >= 2:
+                return True
+        return False
+
+    def _runtime_conditional_draft(
+        self,
+        state: DiagnosisState,
+    ) -> AgentResult | None:
+        """Answer from verified quotes plus the user's supplied runtime fact."""
+        verified = [item for item in state.evidence if item.verified and item.quote]
+        if not verified:
+            return None
+        ordered: list = []
+        per_path: dict[str, int] = {}
+        for item in verified:
+            if per_path.get(item.source_path, 0) >= 2:
+                continue
+            ordered.append(item)
+            per_path[item.source_path] = per_path.get(item.source_path, 0) + 1
+            if len(ordered) >= 8:
+                break
+        excerpts = "\n".join(
+            f"- {' '.join((item.quote or '').split())[:240]}"
+            f"（{item.citation_key}）"
+            for item in ordered
+        )
+        supplied = "；".join(
+            f"{item.label[:40]}: {' '.join(item.content.split())[:200]}"
+            for item in state.runtime_context
+        )
+        summary = (
+            "已核验的文档原文：\n"
+            f"{excerpts}\n\n"
+            f"用户补充的运行时事实（用户提供，未验证）：{supplied}。\n\n"
+            "文档未声明该事实的具体取值，因此这里只能给出条件化结论："
+            "若用户提供的内容准确，则结论以其为准；该内容不能作为知识库规则引用。"
+        )
+        state.diagnosis_draft = DiagnosisDraft(
+            summary=summary,
+            recommended_actions=[],
+            cited_evidence=[item.citation_key for item in ordered],
+            uncertainties=[
+                "运行时事实由用户提供，未验证。",
+                "文档未直接声明该运行时取值。",
+            ],
+            confidence="low",
+        )
+        state.human_request = None
+        return AgentResult(
+            role=self.role,
+            status=AgentResultStatus.SUCCEEDED,
+            message="Created conditional draft from user-supplied runtime fact",
+            next_stage=WorkflowStage.CRITIQUE,
+        )
+
+    @staticmethod
+    def _command_preview(command: str) -> str:
+        preview = " ".join(command.split())
+        return preview[:200]
 
     def _rule_based_reason(self, state: DiagnosisState) -> AgentResult:
         verified = [item for item in state.evidence if item.verified and item.quote]
@@ -231,6 +375,7 @@ class ReasonerAgent:
                 expected_input="错误日志、配置项名称、软件版本或问题复现描述",
                 reason="Insufficient verified evidence",
                 request_id=uuid.uuid4().hex[:12],
+                attempt=state.resume_count + 1,
             )
             return AgentResult(
                 role=self.role,
@@ -278,7 +423,8 @@ class ReasonerAgent:
                 f"- {item.citation_key} verified={item.verified} "
                 f"version={item.source_version or 'unspecified'} "
                 f"section={item.section or 'unspecified'}\n"
-                f"  Summary: {item.summary}\n"
+                f"  Digest (model-written, not evidence; verify against quote): "
+                f"{item.summary}\n"
                 f"  Declared support: "
                 f"{'; '.join(item.supports_obligations) or 'unassigned'}\n"
                 f"  Exact quote: {(item.quote or '')[:800]}"
@@ -291,7 +437,7 @@ class ReasonerAgent:
             return "none"
         return "\n".join(
             f"- request={item.request_id or 'unknown'} verified={item.verified} "
-            f"{item.label}: {item.content[:1000]}"
+            f"trust={item.trust} {item.label}: {item.content[:1000]}"
             for item in state.runtime_context
         )
 

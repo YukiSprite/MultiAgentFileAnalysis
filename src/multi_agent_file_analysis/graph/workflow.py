@@ -12,6 +12,7 @@ from multi_agent_file_analysis.agents.base import AgentContext
 from multi_agent_file_analysis.audit import AuditEvent, AuditEventType, AuditRecorder
 from multi_agent_file_analysis.core import (
     ReviewDecision,
+    TrustLevel,
     WorkflowStage,
     WorkflowStatus,
 )
@@ -50,6 +51,7 @@ class DiagnosisWorkflow:
         llm_client: LLMClient | None = None,
         max_iterations: int = 16,
         max_review_retries: int = 2,
+        max_hitl_resumes: int = 2,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._explorer_node = ExplorerNode(explorer)
@@ -61,6 +63,7 @@ class DiagnosisWorkflow:
         self._llm_client = llm_client
         self._max_iterations = max_iterations
         self._max_review_retries = max_review_retries
+        self._max_hitl_resumes = max_hitl_resumes
         # Monotonic by default: stage durations must not move with wall-clock
         # adjustments. Injected in tests to keep timings deterministic.
         self._clock = clock
@@ -133,6 +136,8 @@ class DiagnosisWorkflow:
         if state.status != WorkflowStatus.WAITING_FOR_HUMAN:
             raise WorkflowError("Cannot resume: workflow is not waiting for input")
         context = context or self._context(state)
+        if state.resume_count >= self._max_hitl_resumes:
+            return self._abstain_hitl_budget(state, context)
 
         if self._hitl_session:
             from multi_agent_file_analysis.hitl import HumanResponse
@@ -146,7 +151,11 @@ class DiagnosisWorkflow:
             if not content:
                 raise WorkflowError("Human response must not be empty")
             state.runtime_context.append(
-                RuntimeContextItem(label="user_input", content=content)
+                RuntimeContextItem(
+                    label="user_input",
+                    content=content,
+                    trust=TrustLevel.USER_ASSERTED,
+                )
             )
 
         state.resume_count += 1
@@ -191,6 +200,9 @@ class DiagnosisWorkflow:
 
             if state.status == WorkflowStatus.WAITING_FOR_HUMAN:
                 state.next_stage = WorkflowStage.REASON
+                state.partial_answer = render_partial_answer(state)
+                return state
+            if state.status == WorkflowStatus.ABSTAINED:
                 state.partial_answer = render_partial_answer(state)
                 return state
             if state.status == WorkflowStatus.FAILED:
@@ -269,6 +281,14 @@ class DiagnosisWorkflow:
                 state.errors.append("HITL requested but not configured")
                 state.status = WorkflowStatus.FAILED
                 return None
+            if state.resume_count >= self._max_hitl_resumes:
+                self._abstain_hitl_budget(state, context)
+                return NodeResult(
+                    status=WorkflowStatus.ABSTAINED,
+                    current_stage=WorkflowStage.REQUEST_HUMAN_INPUT,
+                    next_stage=None,
+                    message=state.last_transition_reason,
+                )
             hitl_started = self._clock()
             hitl_result = self._hitl_node.run(state, context)
             state.metrics.stage(WorkflowStage.REQUEST_HUMAN_INPUT).add(
@@ -276,6 +296,29 @@ class DiagnosisWorkflow:
             )
             return hitl_result
         return result
+
+    def _abstain_hitl_budget(
+        self,
+        state: DiagnosisState,
+        context: AgentContext,
+    ) -> DiagnosisState:
+        """End the run when asking for runtime facts would exceed the budget."""
+        state.status = WorkflowStatus.ABSTAINED
+        state.next_stage = None
+        state.last_transition_reason = (
+            "HITL resume budget exhausted; missing runtime facts"
+        )
+        state.errors.append(state.last_transition_reason)
+        self._close_metrics(state)
+        self._emit(
+            context,
+            AuditEventType.WORKFLOW_FAILED,
+            state.last_transition_reason,
+            self._metrics_payload(state),
+        )
+        state.partial_answer = render_partial_answer(state)
+        state.human_request = None
+        return state
 
     def _finalize(
         self,

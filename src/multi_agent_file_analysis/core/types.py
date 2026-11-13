@@ -59,6 +59,20 @@ class ReviewDecision(StrEnum):
     REJECTED = "rejected"
 
 
+class TrustLevel(StrEnum):
+    """How far a supplied statement can be trusted.
+
+    Only DOCUMENTARY material may support documented rules. USER_ASSERTED
+    material describes the user's own environment: it can support a conditional
+    conclusion but can never establish or override rule meaning. MODEL_DIGEST is
+    model-written prose about evidence and is not evidence at all.
+    """
+
+    DOCUMENTARY = "documentary"
+    USER_ASSERTED = "user_asserted"
+    MODEL_DIGEST = "model_digest"
+
+
 class EvidenceKind(StrEnum):
     """Evidence categories stored in shared state."""
 

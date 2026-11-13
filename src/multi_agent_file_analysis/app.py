@@ -96,6 +96,7 @@ class ApplicationFactory:
             llm_client=llm_client,
             max_iterations=config.max_workflow_iterations,
             max_review_retries=config.max_review_retries,
+            max_hitl_resumes=config.max_hitl_resumes,
         )
 
         # 9. Create QA service

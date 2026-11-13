@@ -7,7 +7,7 @@ from pathlib import Path
 from multi_agent_file_analysis.agents import ExplorerAgent
 from multi_agent_file_analysis.config import AppConfig
 from multi_agent_file_analysis.core import AgentResultStatus
-from multi_agent_file_analysis.graph import DiagnosisState
+from multi_agent_file_analysis.graph import DiagnosisState, RetrievalPlan
 from multi_agent_file_analysis.index import (
     IndexNode,
     NodeKind,
@@ -358,6 +358,84 @@ class ExplorerNativeToolTests(unittest.TestCase):
             self.assertIn("方格决定一个生物是否位于区域内", seed_prompt)
             self.assertEqual(2, len(state.evidence))
             self.assertEqual([], state.uncovered_evidence_obligations)
+
+
+class DigestIntegrityTests(unittest.TestCase):
+    def _vfs(self, tmp: str) -> VirtualFileSystem:
+        base = Path(tmp)
+        root = base / "kb"
+        root.mkdir()
+        (root / "rule.md").write_text(
+            "# Rule\n\nRestart=always\n\ndrop-in sets Restart=on-failure\n",
+            encoding="utf-8",
+        )
+        index_path = base / "index.yaml"
+        index_path.write_text("version: '0.2'\n", encoding="utf-8")
+        index = PageIndex(
+            version="0.2",
+            root=IndexNode(
+                path="/",
+                kind=NodeKind.DIRECTORY,
+                description="root",
+                children=[
+                    IndexNode(
+                        path="/rule.md",
+                        kind=NodeKind.FILE,
+                        description="Restart rule",
+                        source="rule.md",
+                    )
+                ],
+            ),
+        )
+        return VirtualFileSystem(PageIndexRepository(index, root), AppConfig(index_path, root))
+
+    def test_digest_tokens_keep_only_config_values(self) -> None:
+        tokens = ExplorerAgent._digest_tokens(
+            "The main unit is Restart=always in a 5s window, see ssh-policy-b. 纯中文"
+        )
+        self.assertEqual(
+            {"restart=always", "5s", "ssh-policy-b"},
+            tokens,
+        )
+
+    def test_summary_beyond_quote_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = ExplorerAgent(vfs=self._vfs(tmp))
+            state = DiagnosisState(user_query="restart policy")
+            plan = RetrievalPlan(evidence_obligations=["restart rule"])
+            message = agent._record_model_evidence(
+                {
+                    "source_path": "/rule.md",
+                    "summary": "The main unit is Restart=always",
+                    "kind": "rule",
+                    "quote": "drop-in sets Restart=on-failure",
+                    "supports_obligations": ["restart rule"],
+                },
+                state,
+                plan,
+            )
+            self.assertIn("restart=always", message)
+            self.assertIn("not present in quote", message)
+            self.assertEqual([], state.evidence)
+
+    def test_chinese_paraphrase_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = ExplorerAgent(vfs=self._vfs(tmp))
+            state = DiagnosisState(user_query="restart policy")
+            plan = RetrievalPlan(evidence_obligations=["restart rule"])
+            message = agent._record_model_evidence(
+                {
+                    "source_path": "/rule.md",
+                    "summary": "重启策略被改为失败后重启",
+                    "kind": "rule",
+                    "quote": "drop-in sets Restart=on-failure",
+                    "supports_obligations": ["restart rule"],
+                },
+                state,
+                plan,
+            )
+            self.assertIn("verified", message)
+            self.assertEqual(1, len(state.evidence))
 
 
 if __name__ == "__main__":

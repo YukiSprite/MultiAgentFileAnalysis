@@ -10,6 +10,7 @@ from multi_agent_file_analysis.agents.base import (
     AgentContext,
     AgentResult,
     call_llm,
+    digest_tokens,
 )
 from multi_agent_file_analysis.audit import AuditEvent, AuditEventType, ToolAuditPayload
 from multi_agent_file_analysis.core import (
@@ -780,6 +781,17 @@ class ExplorerAgent:
         except Exception as exc:
             return f"Evidence rejected: {exc}"
 
+        missing = sorted(
+            self._digest_tokens(summary) - self._digest_tokens(verification.quote)
+        )
+        if missing:
+            shown = ", ".join(missing[:5])
+            return (
+                f"Evidence rejected: summary mentions {shown}, not present in "
+                "quote. Extend the quote to include the operative lines, or "
+                "remove the claim from summary."
+            )
+
         try:
             kind = EvidenceKind(str(payload.get("kind") or "rule"))
         except ValueError:
@@ -817,6 +829,11 @@ class ExplorerAgent:
             )
         state.evidence.append(evidence)
         return f"Evidence verified and recorded as {evidence.citation_key}."
+
+    @staticmethod
+    def _digest_tokens(text: str) -> set[str]:
+        """Extract technically checkable tokens from digest text."""
+        return digest_tokens(text)
 
     @staticmethod
     def _append_evidence(state: DiagnosisState, evidence: EvidenceItem) -> bool:

@@ -342,8 +342,18 @@ function renderHitl(run) {
   const request = run.human_request;
   const section = document.createElement("section");
   section.className = "hitl";
+  const rejected = request.command_warning
+    ? `<p class="muted">建议命令未通过只读门禁：${esc(
+        request.command_warning
+      )}</p>` +
+      (request.rejected_command
+        ? `<p class="muted">原始建议：</p><code>${esc(
+            request.rejected_command
+          )}</code>`
+        : "")
+    : "";
   section.innerHTML = `
-    <p><strong>需要补充现场信息</strong></p>
+    <p><strong>需要补充现场信息（第 ${request.attempt || 1} 次追问）</strong></p>
     <p>${esc(request.prompt)}</p>
     <p class="muted">期望输入：${esc(request.expected_input)}</p>
     ${request.reason ? `<p class="muted">原因：${esc(request.reason)}</p>` : ""}
@@ -354,6 +364,7 @@ function renderHitl(run) {
           )}</code>`
         : ""
     }
+    ${rejected}
     <textarea rows="3" placeholder="粘贴该命令的输出或当前状态…"></textarea>
     <div class="card-actions"><button type="button">提交并继续</button></div>`;
 
