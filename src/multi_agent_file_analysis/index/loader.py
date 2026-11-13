@@ -268,7 +268,7 @@ def _scan_dir(
                     "path": _to_virtual_path(root_dir, entry),
                     "kind": "file",
                     "description": description,
-                    "source": str(entry.relative_to(root_dir)),
+                    "source": entry.relative_to(root_dir).as_posix(),
                     "title": title,
                     "tags": _string_list(frontmatter.get("tags")),
                     "aliases": _string_list(frontmatter.get("aliases")),

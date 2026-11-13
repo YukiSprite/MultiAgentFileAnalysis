@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from multi_agent_file_analysis.core import PageIndexError
 from multi_agent_file_analysis.ingestion import (
     DocumentSource,
     KnowledgeBaseBuilder,
@@ -12,6 +13,16 @@ from multi_agent_file_analysis.index import PageIndexLoader, PageIndexRepository
 
 
 class IngestionTests(unittest.TestCase):
+    def test_windows_drive_paths_and_file_uris_are_local(self) -> None:
+        self.assertEqual(
+            Path("C:/docs/rule.md"),
+            KnowledgeBaseBuilder._local_path("C:/docs/rule.md"),
+        )
+        with self.assertRaises(PageIndexError):
+            KnowledgeBaseBuilder._local_path("https://example.com/rule.md")
+        with self.assertRaises(PageIndexError):
+            KnowledgeBaseBuilder._local_path("file://remote-host/rule.md")
+
     def test_local_markdown_is_ingested_and_indexed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

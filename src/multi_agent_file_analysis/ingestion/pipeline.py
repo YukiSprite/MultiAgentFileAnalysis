@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import yaml
 
@@ -131,7 +132,7 @@ class KnowledgeBaseBuilder:
                     f"Ingested file is outside output root: {local_path}"
                 )
             digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
-            relative_source = str(local_path.relative_to(output_root))
+            relative_source = local_path.relative_to(output_root).as_posix()
             metadata = dict(document.source.metadata)
             metadata.pop("virtual_path", None)
             metadata["sha256"] = digest
@@ -169,12 +170,23 @@ class KnowledgeBaseBuilder:
 
     @staticmethod
     def _local_path(uri: str) -> Path:
+        if uri.startswith("file:"):
+            parsed = urlparse(uri)
+            if parsed.netloc not in {"", "localhost"}:
+                raise PageIndexError(
+                    f"Unsupported file URI host: {uri}"
+                )
+            return Path(url2pathname(parsed.path))
         parsed = urlparse(uri)
-        if parsed.scheme not in {"", "file"}:
+        # A Windows drive letter looks like a URI scheme ("C:\docs\a.md").
+        is_windows_drive = (
+            len(uri) >= 2 and uri[1] == ":" and uri[0].isalpha()
+        )
+        if parsed.scheme and not is_windows_drive:
             raise PageIndexError(
                 f"Only local file sources are supported in this MVP: {uri}"
             )
-        return Path(unquote(parsed.path) if parsed.scheme == "file" else uri)
+        return Path(uri)
 
     @staticmethod
     def _normalize_virtual_path(path: str) -> str:
