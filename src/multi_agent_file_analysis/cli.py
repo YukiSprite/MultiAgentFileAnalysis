@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from multi_agent_file_analysis.app import ApplicationFactory
+from multi_agent_file_analysis.app import ApplicationFactory, mount_corpus
 from multi_agent_file_analysis.config import AppConfig
 from multi_agent_file_analysis.core import RunMode, WorkflowStatus
 from multi_agent_file_analysis.qa import QARequest
@@ -288,7 +287,6 @@ def _cmd_ingest_chm(args: argparse.Namespace) -> int:
 
 def _cmd_chat(args: argparse.Namespace) -> int:
     from multi_agent_file_analysis.corpora import CorpusCatalog
-    from multi_agent_file_analysis.index import PageIndexLoader
 
     knowledge_root = args.knowledge_base.resolve()
     try:
@@ -313,38 +311,35 @@ def _cmd_chat(args: argparse.Namespace) -> int:
         return 130
     if selected is None:
         return 0
-    corpus, corpus_root = selected
+    corpus, _corpus_root = selected
 
     print(f"\n正在挂载知识库：{corpus.name}……")
-    with tempfile.TemporaryDirectory(prefix="mafa-corpus-index-") as temporary:
-        index_path = Path(temporary) / "page_index.yaml"
-        try:
-            index = PageIndexLoader.scan_directory(corpus_root, index_path)
-            if not index.documents:
-                raise ValueError("selected corpus contains no Markdown documents")
-            config = AppConfig(
-                page_index_path=index_path,
-                knowledge_base_root=corpus_root,
-                run_mode=(
-                    RunMode.DRY_RUN if args.dry_run else RunMode.INTERACTIVE
-                ),
-                env_file_path=args.env_file.resolve(),
-                audit_log_path=(
-                    args.audit_log.resolve() if args.audit_log else None
-                ),
-                max_file_chars=args.max_chars,
-            )
-            services = ApplicationFactory().build(config)
-        except Exception as exc:
-            print(f"知识库初始化失败：{exc}", file=sys.stderr)
-            return 2
+    try:
+        mount = mount_corpus(
+            corpus,
+            knowledge_root,
+            run_mode=(
+                RunMode.DRY_RUN if args.dry_run else RunMode.INTERACTIVE
+            ),
+            env_file_path=args.env_file.resolve(),
+            audit_log_path=(
+                args.audit_log.resolve() if args.audit_log else None
+            ),
+            max_file_chars=args.max_chars,
+        )
+    except Exception as exc:
+        print(f"知识库初始化失败：{exc}", file=sys.stderr)
+        return 2
 
-        print(f"已选择：{corpus.name}（{len(index.documents)} 篇文档）")
+    try:
+        print(f"已选择：{corpus.name}（{mount.document_count} 篇文档）")
         print("当前会话中，Agent 只能看到这个知识库。")
         return _interactive_loop(
-            services.qa_service,
+            mount.services.qa_service,
             corpus_name=corpus.name,
         )
+    finally:
+        mount.close()
 
 
 def _select_corpus(options):

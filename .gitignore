@@ -11,6 +11,9 @@ __pycache__/
 !.env.example
 .claude/
 
+# OpenSpec working artifacts stay local; only the specs are versioned
+openspec/changes/
+
 # Private project material
 内部项目思路/
 

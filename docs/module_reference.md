@@ -2,7 +2,7 @@
 
 ## `app.py` / `config.py`
 
-`ApplicationFactory` 先从当前工作目录的 `.env`（或 `AppConfig.env_file_path` 指定文件）加载模型配置，再校验配置并装配 Index、VFS、LLM、Agent、HITL、Workflow、Audit 和 QA Service。加载遵循 `override=False`，不会覆盖现有进程环境变量。`AppConfig` 集中定义目录分页、文件大小、搜索文件数、单文件与跨文件搜索字符数、候选文档数、模型轮次、审查重试和用户输入等预算。单文件搜索上限与可接受源文件上限一致，避免大文件尾部不可检索；跨文件总预算负责限制整体开销。
+`ApplicationFactory` 先从当前工作目录的 `.env`（或 `AppConfig.env_file_path` 指定文件）加载模型配置，再校验配置并装配 Index、VFS、LLM、Agent、HITL、Workflow、Audit 和 QA Service。加载遵循 `override=False`，不会覆盖现有进程环境变量。`AppConfig` 集中定义目录分页、文件大小、搜索文件数、单文件与跨文件搜索字符数、候选文档数、模型轮次、审查重试和用户输入等预算。单文件搜索上限与可接受源文件上限一致，避免大文件尾部不可检索；跨文件总预算负责限制整体开销。`mount_corpus` 把"扫描一个语料 → 生成临时 Page Index → 装配服务"封装成 `CorpusMount`，索引目录由挂载对象持有并在 `close()` 时删除；CLI 与控制台共用该入口。`ApplicationFactory.build` 也接受外部注入的 `audit_recorder`，供控制台把审计事件扇出到事件总线。
 
 ## `corpora.py` / `.mafa-corpus.yaml`
 
@@ -85,3 +85,21 @@
 `QAService` 提供 `ask`、`resume` 和按 run ID 恢复。CLI 支持 `index`、`ingest-chm`、
 `chat`、`ask`、交互模式、dry-run 和旧式省略 `ask` 的快捷写法。不带参数运行
 `mafa` 等价于 `mafa chat`；`chat` 在每次回答后继续接收新问题。
+
+## `web/`
+
+- `sessions.py`：`SessionRegistry` 持有 `sid → WebSession`，每个会话绑定一个
+  `CorpusMount`，独占其临时索引；滑动空闲 TTL、会话数上限和显式关闭都在这里；
+- `jobs.py`：`JobRunner` 用线程池执行同步的 `QAService.ask/resume`，同一会话用
+  `WebSession.lock` 串行，不同会话并行；等待人工输入发布 `pause`，真正结束才发布
+  唯一的 `terminal`；
+- `events.py`：`EventBus` 为每个 run 保留有界事件环，订阅时先回放快照再接收实时
+  增量；`FanoutAuditRecorder` 把同一条审计事件同时写入内存、可选 JSONL 和事件总线，
+  单个接收端失败不会中断诊断；
+- `serializers.py`：只输出可呈现内容。阶段性结果不带未批准的操作建议，未通过门禁的
+  建议命令不出现，证据标记"草稿引用 / 未引用"；
+- `server.py`：FastAPI 路由（语料、会话、run、SSE、静态页），错误统一为
+  `{"error": {"code", "message"}}`；
+- `static/`：无构建单页，`is_partial` 使用警示样式并常驻"未通过最终审查"标记。
+
+会话只存在于创建它的进程内，因此部署时必须单 worker。

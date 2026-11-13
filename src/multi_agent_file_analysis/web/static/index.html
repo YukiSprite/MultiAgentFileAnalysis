@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MAFA 控制台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>MAFA</strong>
+        <span>证据约束诊断</span>
+      </div>
+      <div class="topbar-actions">
+        <label class="switch" id="dryRunWrap">
+          <input type="checkbox" id="dryRun" checked />
+          <span>dry-run</span>
+        </label>
+        <span class="badge badge-dry" id="dryBadge" hidden>dry-run</span>
+        <button class="ghost" id="switchCorpus" hidden>切换语料</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="panel" id="picker">
+        <h1>选择知识库</h1>
+        <p class="hint">
+          选中后，本次会话只能看到该知识库。dry-run 不调用模型，只做确定性检索与证据核验。
+        </p>
+        <div class="corpora" id="corpora"></div>
+        <p class="error" id="pickerError" hidden></p>
+      </section>
+
+      <section class="chat" id="chat" hidden>
+        <div class="sessionbar">
+          <div>
+            <strong id="corpusName"></strong>
+            <span class="muted" id="docCount"></span>
+          </div>
+          <span class="muted" id="runMeta"></span>
+        </div>
+        <div class="messages" id="messages"></div>
+        <form class="composer" id="askForm">
+          <textarea
+            id="query"
+            rows="2"
+            placeholder="描述问题，或粘贴症状 / 报错信息…"
+            required
+          ></textarea>
+          <button type="submit" id="askButton">发送</button>
+        </form>
+        <p class="error" id="chatError" hidden></p>
+      </section>
+    </main>
+
+    <div class="scrim" id="scrim" hidden></div>
+    <aside class="drawer" id="drawer" hidden aria-label="运行详情">
+      <div class="drawer-head">
+        <strong id="drawerTitle">详情</strong>
+        <button class="icon" id="drawerClose" aria-label="关闭">×</button>
+      </div>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
