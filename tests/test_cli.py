@@ -65,6 +65,9 @@ class CLITests(unittest.TestCase):
         self.assertEqual(0, status, errors.getvalue())
         self.assertIn("诊断摘要", output.getvalue())
         self.assertIn("GW-004", output.getvalue())
+        self.assertIn("[metrics]", output.getvalue())
+        self.assertIn("total=0", output.getvalue())
+        self.assertIn("no-usage calls=0", output.getvalue())
 
     def test_explicit_ask_command_executes(self) -> None:
         output = io.StringIO()

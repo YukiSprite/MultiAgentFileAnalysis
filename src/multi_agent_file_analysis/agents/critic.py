@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from multi_agent_file_analysis.agents.base import AgentContext, AgentResult
+from multi_agent_file_analysis.agents.base import (
+    AgentContext,
+    AgentResult,
+    call_llm,
+)
 from multi_agent_file_analysis.core import (
     AgentResultStatus,
     AgentRole,
@@ -167,7 +171,12 @@ class CriticAgent:
                 ),
             ),
         ]
-        response = llm.complete(LLMRequest(messages=messages))
+        response = call_llm(
+            state,
+            AgentRole.CRITIC,
+            llm,
+            LLMRequest(messages=messages),
+        )
         parsed = self._parse_action(response.message.content)
         if parsed is None:
             return self._report(

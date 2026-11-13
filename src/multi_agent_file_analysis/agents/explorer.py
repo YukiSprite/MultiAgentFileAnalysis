@@ -6,7 +6,11 @@ import json
 import re
 from typing import Any
 
-from multi_agent_file_analysis.agents.base import AgentContext, AgentResult
+from multi_agent_file_analysis.agents.base import (
+    AgentContext,
+    AgentResult,
+    call_llm,
+)
 from multi_agent_file_analysis.audit import AuditEvent, AuditEventType, ToolAuditPayload
 from multi_agent_file_analysis.core import (
     AgentResultStatus,
@@ -245,12 +249,15 @@ class ExplorerAgent:
         tool_definitions = self._tool_definitions()
 
         for _ in range(self._max_turns):
-            response = llm.complete(
+            response = call_llm(
+                state,
+                AgentRole.EXPLORER,
+                llm,
                 LLMRequest(
                     messages=messages,
                     tools=tool_definitions,
                     tool_choice="auto",
-                )
+                ),
             )
             assistant_message = response.message
             content = assistant_message.content
@@ -410,7 +417,10 @@ class ExplorerAgent:
                 f"notes={'; '.join(state.critic_report.notes) or 'none'}\n"
                 f"missing={'; '.join(state.critic_report.missing_evidence) or 'none'}"
             )
-        response = llm.complete(
+        response = call_llm(
+            state,
+            AgentRole.EXPLORER,
+            llm,
             LLMRequest(
                 messages=[
                     LLMMessage(
@@ -427,7 +437,7 @@ class ExplorerAgent:
                         ),
                     ),
                 ]
-            )
+            ),
         )
         parsed = self._parse_action(response.message.content) or {}
         obligations = self._bounded_plan_items(parsed.get("evidence_obligations"))

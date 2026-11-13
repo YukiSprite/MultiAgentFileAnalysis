@@ -791,6 +791,13 @@ class StaticAndIntegrationTests(ConsoleTestBase):
             response = client.get("/static/app.js")
             self.assertEqual(200, response.status_code)
 
+    def test_console_assets_render_metrics_panel(self) -> None:
+        app, client = self.make_client()
+        with client:
+            script = client.get("/static/app.js").text
+        self.assertIn("用量与耗时", script)
+        self.assertIn("total_tokens", script)
+
     def test_ops_demo_full_cycle_with_dry_run(self) -> None:
         app = create_app(
             PROJECT_ROOT / "knowledge_base",

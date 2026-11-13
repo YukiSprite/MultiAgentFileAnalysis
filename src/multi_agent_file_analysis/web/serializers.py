@@ -57,6 +57,7 @@ def run_payload(session: WebSession, job: RunJob) -> dict[str, Any]:
         "critic": _critic(state),
         "trace": _trace(state),
         "runtime_context": _runtime_context(state),
+        "metrics": state.metrics.to_dict() if state is not None else None,
     }
     return payload
 

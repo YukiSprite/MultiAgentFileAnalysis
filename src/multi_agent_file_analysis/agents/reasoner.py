@@ -6,7 +6,11 @@ import json
 import uuid
 from typing import Any
 
-from multi_agent_file_analysis.agents.base import AgentContext, AgentResult
+from multi_agent_file_analysis.agents.base import (
+    AgentContext,
+    AgentResult,
+    call_llm,
+)
 from multi_agent_file_analysis.core import AgentResultStatus, AgentRole, WorkflowStage
 from multi_agent_file_analysis.graph.state import (
     DiagnosisDraft,
@@ -123,7 +127,12 @@ class ReasonerAgent:
                 ),
             ),
         ]
-        response = llm.complete(LLMRequest(messages=messages))
+        response = call_llm(
+            state,
+            AgentRole.REASONER,
+            llm,
+            LLMRequest(messages=messages),
+        )
         parsed = self._parse_action(response.message.content)
         if parsed is None:
             state.errors.append("Reasoner returned invalid JSON")

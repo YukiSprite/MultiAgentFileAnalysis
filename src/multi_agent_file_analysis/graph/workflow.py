@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import time
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from multi_agent_file_analysis.agents.base import AgentContext
@@ -47,6 +50,7 @@ class DiagnosisWorkflow:
         llm_client: LLMClient | None = None,
         max_iterations: int = 16,
         max_review_retries: int = 2,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._explorer_node = ExplorerNode(explorer)
         self._reasoner_node = ReasonerNode(reasoner)
@@ -57,6 +61,9 @@ class DiagnosisWorkflow:
         self._llm_client = llm_client
         self._max_iterations = max_iterations
         self._max_review_retries = max_review_retries
+        # Monotonic by default: stage durations must not move with wall-clock
+        # adjustments. Injected in tests to keep timings deterministic.
+        self._clock = clock
 
     def plan(self) -> WorkflowPlan:
         stages = [
@@ -104,6 +111,8 @@ class DiagnosisWorkflow:
             raise WorkflowError("Use resume() for a workflow awaiting human input")
         if not state.run_id:
             state.run_id = uuid.uuid4().hex[:12]
+        if state.metrics.started_at is None:
+            state.metrics.started_at = self._clock()
         context = context or self._context(state)
         event = (
             AuditEventType.WORKFLOW_STARTED
@@ -211,10 +220,12 @@ class DiagnosisWorkflow:
                         "Critic retry budget exhausted"
                     )
                     state.errors.append(state.last_transition_reason)
+                    self._close_metrics(state)
                     self._emit(
                         context,
                         AuditEventType.WORKFLOW_FAILED,
                         state.last_transition_reason,
+                        self._metrics_payload(state),
                     )
                     state.partial_answer = render_partial_answer(state)
                     return state
@@ -234,20 +245,37 @@ class DiagnosisWorkflow:
         state: DiagnosisState,
         context: AgentContext,
     ) -> NodeResult | None:
+        """Run one stage and account its duration.
+
+        Timing sits per node rather than around the whole dispatch so a
+        human-input pause is charged to ``REQUEST_HUMAN_INPUT`` instead of
+        inflating ``REASON``.
+        """
+        started = self._clock()
         if stage == WorkflowStage.EXPLORE:
-            return self._explorer_node.run(state, context)
-        if stage == WorkflowStage.REASON:
+            result = self._explorer_node.run(state, context)
+        elif stage == WorkflowStage.CRITIQUE:
+            result = self._critic_node.run(state, context)
+        elif stage == WorkflowStage.REASON:
             result = self._reasoner_node.run(state, context)
-            if result.next_stage == WorkflowStage.REQUEST_HUMAN_INPUT:
-                if self._hitl_node is None:
-                    state.errors.append("HITL requested but not configured")
-                    state.status = WorkflowStatus.FAILED
-                    return None
-                return self._hitl_node.run(state, context)
-            return result
-        if stage == WorkflowStage.CRITIQUE:
-            return self._critic_node.run(state, context)
-        return None
+        else:
+            return None
+        state.metrics.stage(stage).add(self._clock() - started)
+
+        if stage == WorkflowStage.REASON and (
+            result.next_stage == WorkflowStage.REQUEST_HUMAN_INPUT
+        ):
+            if self._hitl_node is None:
+                state.errors.append("HITL requested but not configured")
+                state.status = WorkflowStatus.FAILED
+                return None
+            hitl_started = self._clock()
+            hitl_result = self._hitl_node.run(state, context)
+            state.metrics.stage(WorkflowStage.REQUEST_HUMAN_INPUT).add(
+                self._clock() - hitl_started
+            )
+            return hitl_result
+        return result
 
     def _finalize(
         self,
@@ -268,10 +296,12 @@ class DiagnosisWorkflow:
         state.next_stage = None
         state.status = WorkflowStatus.COMPLETED
         state.partial_answer = None
+        self._close_metrics(state)
         self._emit(
             context,
             AuditEventType.WORKFLOW_FINISHED,
             "Workflow completed with an approved answer",
+            self._metrics_payload(state),
         )
         return state
 
@@ -283,10 +313,12 @@ class DiagnosisWorkflow:
         state.status = WorkflowStatus.FAILED
         state.next_stage = None
         state.partial_answer = render_partial_answer(state)
+        self._close_metrics(state)
         self._emit(
             context,
             AuditEventType.WORKFLOW_FAILED,
             state.errors[-1] if state.errors else "Workflow failed",
+            self._metrics_payload(state),
         )
         return state
 
@@ -297,11 +329,36 @@ class DiagnosisWorkflow:
             audit_recorder=self._audit_recorder,
         )
 
+    def _close_metrics(self, state: DiagnosisState) -> None:
+        """Stamp the end of a run once, on terminal states only.
+
+        A pause is not terminal: it keeps ``ended_at`` unset so readers cannot
+        mistake a suspended run for a finished one.
+        """
+        if state.metrics.ended_at is None:
+            state.metrics.ended_at = self._clock()
+
+    def _metrics_payload(self, state: DiagnosisState) -> dict[str, str]:
+        """Flatten the ledger into string audit fields.
+
+        ``AuditEvent.payload`` is ``dict[str, str]``; keeping that contract means
+        the full ledger travels as one JSON string plus a scalar total that
+        grep/jq can read without parsing.
+        """
+        return {
+            "metrics": json.dumps(
+                state.metrics.to_dict(),
+                ensure_ascii=False,
+            ),
+            "metrics_total_tokens": str(state.metrics.total_tokens),
+        }
+
     @staticmethod
     def _emit(
         context: AgentContext,
         event_type: AuditEventType,
         message: str,
+        payload: dict[str, str] | None = None,
     ) -> None:
         if context.audit_recorder:
             context.audit_recorder.record(
@@ -309,5 +366,6 @@ class DiagnosisWorkflow:
                     event_type=event_type,
                     run_id=context.run_id,
                     message=message,
+                    payload=payload or {},
                 )
             )

@@ -513,6 +513,36 @@ def _interactive_loop(qa_service, *, corpus_name: str | None = None) -> int:
         _print_response(response)
 
 
+def _print_metrics(state) -> None:
+    """Print the run's accounting on one line for terminal users.
+
+    Values come from ``RunMetrics.to_dict()`` so this line, the web payload and
+    the audit record cannot disagree. Token counts only: no price is assumed.
+    """
+    payload = state.metrics.to_dict()
+    stages = (
+        " ".join(
+            f"{name}={timing['seconds']:.2f}s"
+            for name, timing in payload["stages"].items()
+        )
+        or "none"
+    )
+    roles = (
+        " ".join(
+            f"{name}={usage['prompt_tokens']}/{usage['completion_tokens']}"
+            for name, usage in payload["roles"].items()
+        )
+        or "none"
+    )
+    missing_usage = sum(
+        usage["calls_without_usage"] for usage in payload["roles"].values()
+    )
+    print(
+        f"[metrics] stages {stages} | tokens {roles} "
+        f"total={payload['total_tokens']} | no-usage calls={missing_usage}"
+    )
+
+
 def _print_human_request(request) -> None:
     print("\n[需要补充现场信息]")
     print(request.prompt)
@@ -535,6 +565,7 @@ def _print_response(response) -> int:
         print("\n运行说明：")
         for error in state.errors:
             print(f"- {error}")
+    _print_metrics(state)
     if state.status == WorkflowStatus.COMPLETED:
         return 0
     if state.critic_report is not None:

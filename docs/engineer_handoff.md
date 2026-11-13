@@ -38,6 +38,12 @@ mafa --dry-run "GW-004 错误是什么原因？"
 - 比较 exact-only、当前词法搜索、BM25、混合召回、单 Agent 和多 Agent；
 - 报告证据召回、诊断正确率、误放行率、Token、费用和延迟。
 
+Token 与延迟数据已可由 run 账本直接产出：`DiagnosisState.metrics` 记录分角色
+`prompt_tokens`/`completion_tokens`/`total_tokens`/`calls`/`failures`/
+`calls_without_usage` 与分阶段 `seconds`/`entries`，CLI 摘要、run 查询、
+终止事件和审计日志读取同一份 `RunMetrics.to_dict()`。剩下的是评测集本身与
+跨配置对比；费用仍需外部按单价换算（账本不内置价格）。
+
 ### P1：检索升级
 
 - 用持久化 SQLite FTS5/BM25 替换当前懒构建的内存倒排目录和轻量正文计数；

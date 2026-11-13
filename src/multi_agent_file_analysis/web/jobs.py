@@ -196,5 +196,12 @@ class JobRunner:
                     else False
                 ),
                 "error": job.error,
+                # Same ledger object the run payload reads, so the streamed
+                # terminal event and a later query cannot disagree.
+                "metrics": (
+                    response.state.metrics.to_dict()
+                    if response is not None
+                    else None
+                ),
             },
         )

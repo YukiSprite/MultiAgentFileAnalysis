@@ -11,7 +11,10 @@ from .state import (
     ExplorationStep,
     HumanRequest,
     RetrievalPlan,
+    RoleUsage,
+    RunMetrics,
     RuntimeContextItem,
+    StageTiming,
 )
 from .workflow import DiagnosisWorkflow
 
@@ -29,7 +32,10 @@ __all__ = [
     "NodeResult",
     "ReasonerNode",
     "RetrievalPlan",
+    "RoleUsage",
+    "RunMetrics",
     "RuntimeContextItem",
+    "StageTiming",
     "render_partial_answer",
     "WorkflowEdge",
     "WorkflowNode",

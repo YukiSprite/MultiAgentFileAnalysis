@@ -489,6 +489,36 @@ function traceHtml(run) {
   } · Critic ${attempts.critic ?? 0} · 工作流 ${attempts.workflow ?? 0}</div>
   </div>`);
 
+  const metrics = run.metrics;
+  if (metrics) {
+    const roles = Object.entries(metrics.roles || {})
+      .map(([name, usage]) => {
+        const extra = [
+          usage.failures ? `失败 ${usage.failures}` : "",
+          usage.calls_without_usage ? `未上报 ${usage.calls_without_usage}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<div class="tool-row">${esc(name)} · ${usage.prompt_tokens}/${
+          usage.completion_tokens
+        } tokens · ${usage.calls} 次${extra ? ` · ${extra}` : ""}</div>`;
+      })
+      .join("");
+    const stages = Object.entries(metrics.stages || {})
+      .map(
+        ([name, timing]) =>
+          `<span class="metric-item">${esc(name)} ${timing.seconds.toFixed(2)}s${
+            timing.entries > 1 ? ` ×${timing.entries}` : ""
+          }</span>`
+      )
+      .join(" ");
+    blocks.push(`<div class="trace-block"><h3>用量与耗时</h3>${
+      roles || '<div class="tool-row">无模型调用。</div>'
+    }<div class="tool-row">${
+      stages || "尚无已执行阶段。"
+    }</div><div class="tool-row">合计 ${metrics.total_tokens ?? 0} tokens</div></div>`);
+  }
+
   if (run.errors && run.errors.length) {
     blocks.push(`<div class="trace-block"><h3>运行说明</h3>${run.errors
       .map((item) => `<div class="tool-row">${esc(item)}</div>`)

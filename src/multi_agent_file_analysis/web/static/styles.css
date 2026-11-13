@@ -451,6 +451,16 @@ textarea:focus {
   margin-bottom: 18px;
 }
 
+.metric-item {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 6px;
+  margin: 0 6px 4px 0;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.12);
+  font-variant-numeric: tabular-nums;
+}
+
 .trace-block h3 {
   font-size: 13px;
   margin: 0 0 8px;
